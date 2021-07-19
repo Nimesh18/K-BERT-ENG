@@ -8,6 +8,7 @@ import json
 import random
 import argparse
 import collections
+from torch._C import dtype
 import torch.nn as nn
 from uer.utils.vocab import Vocab
 from uer.utils.constants import *
@@ -31,9 +32,11 @@ class BertClassifier(nn.Module):
         self.labels_num = args.labels_num
         self.pooling = args.pooling
         self.output_layer_1 = nn.Linear(args.hidden_size, args.hidden_size)
+        # print(type(args.labels_num))
+        # print(type(args.hidden_size))
         self.output_layer_2 = nn.Linear(args.hidden_size, args.labels_num)
-        self.softmax = nn.LogSoftmax(dim=-1)
-        self.criterion = nn.NLLLoss()
+        # self.softmax = nn.LogSoftmax(dim=-1)
+        self.criterion = nn.MSELoss()
         self.use_vm = False if args.no_vm else True
         print("[BertClassifier] use visible_matrix: {}".format(self.use_vm))
 
@@ -61,7 +64,13 @@ class BertClassifier(nn.Module):
             output = output[:, 0, :]
         output = torch.tanh(self.output_layer_1(output))
         logits = self.output_layer_2(output)
-        loss = self.criterion(self.softmax(logits.view(-1, self.labels_num)), label.view(-1))
+        # loss = self.criterion(self.softmax(logits.view(-1, self.labels_num)), label.view(-1))
+        loss = self.criterion(logits.view(-1), label.view(-1))
+
+        # print("loss: ", loss)
+        # print("logits: ", logits)
+        # print("loss.shape", loss.size())
+        # print("logits.shape", logits.size())
         return loss, logits
 
 
@@ -92,7 +101,7 @@ def add_knowledge_worker(params):
                 dataset.append((token_ids, label, mask, pos, vm))
             
             elif len(line) == 3:
-                label = int(line[columns["label"]])
+                label = float(line[columns["label"]])
                 text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
 
                 tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
@@ -225,6 +234,9 @@ def main():
     # Connection URL for SQL DB
     parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default="postgresql+psycopg2://@/postgres")
 
+    # Get number of labels
+    parser.add_argument("--labels_num", required=False, type=int, help="Number of classes/labels. If regression problem, set to 1", default=-1)
+
     args = parser.parse_args()
 
     # Load the hyperparameters from the config file.
@@ -256,7 +268,8 @@ def run(args):
                 labels_set.add(label)
             except:
                 pass
-    args.labels_num = len(labels_set) 
+    if args.labels_num == -1:
+        args.labels_num = len(labels_set) 
 
     # Load vocabulary.
     vocab = Vocab()
@@ -349,24 +362,27 @@ def run(args):
             dataset = read_dataset(args.test_path, workers_num=args.workers_num)
         else:
             dataset = read_dataset(args.dev_path, workers_num=args.workers_num)
+            # dataset.append((token_ids, label, mask, pos, vm))
 
         input_ids = torch.LongTensor([sample[0] for sample in dataset])
-        label_ids = torch.LongTensor([sample[1] for sample in dataset])
+        label_ids = torch.FloatTensor([sample[1] for sample in dataset])
         mask_ids = torch.LongTensor([sample[2] for sample in dataset])
         pos_ids = torch.LongTensor([example[3] for example in dataset])
         vms = [example[4] for example in dataset]
+        # print('vms:', vms)
 
         batch_size = args.batch_size
         instances_num = input_ids.size()[0]
         if is_test:
             print("The number of evaluation instances: ", instances_num)
 
-        correct = 0
+        # correct = 0
         # Confusion matrix.
-        confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)
+        # confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)
 
         model.eval()
         
+        total_mse_loss= 0
         if not args.mean_reciprocal_rank:
             for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
@@ -388,32 +404,36 @@ def run(args):
                         print(vms_batch)
                         print(vms_batch.size())
 
-                logits = nn.Softmax(dim=1)(logits)
-                pred = torch.argmax(logits, dim=1)
-                gold = label_ids_batch
-                for j in range(pred.size()[0]):
-                    confusion[pred[j], gold[j]] += 1
-                correct += torch.sum(pred == gold).item()
+                total_mse_loss += loss.item()
+                # logits = nn.Softmax(dim=1)(logits)
+                # pred = torch.argmax(logits, dim=1)
+                # pred = logits
+                # gold = label_ids_batch
+                # for j in range(pred.size()[0]):
+                #     confusion[pred[j], gold[j]] += 1
+                # correct += torch.sum(pred == gold).item()
         
-            if is_test:
-                print("Confusion matrix:")
-                print(confusion)
-                print("Report precision, recall, and f1:")
+            # if is_test:
+            #     print("Confusion matrix:")
+            #     print(confusion)
+            #     print("Report precision, recall, and f1:")
             
-            for i in range(confusion.size()[0]):
-                p = confusion[i,i].item()/confusion[i,:].sum().item()
-                r = confusion[i,i].item()/confusion[:,i].sum().item()
-                f1 = 2*p*r / (p+r)
-                if i == 1:
-                    label_1_f1 = f1
-                print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
-            print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
-            if metrics == 'Acc':
-                return correct/len(dataset)
-            elif metrics == 'f1':
-                return label_1_f1
-            else:
-                return correct/len(dataset)
+            # for i in range(confusion.size()[0]):
+            #     p = confusion[i,i].item()/confusion[i,:].sum().item()
+            #     r = confusion[i,i].item()/confusion[:,i].sum().item()
+            #     f1 = 2*p*r / (p+r)
+            #     if i == 1:
+            #         label_1_f1 = f1
+            #     print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
+            # print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
+            print(f"Total MSE Loss = {total_mse_loss:.3f}, batches = {i + 1}, Avg loss = {total_mse_loss/(i+1):.3f}")
+            return total_mse_loss/(i + 1)
+
+            # if metrics == 'Acc':
+            # elif metrics == 'f1':
+            #     return total_mse_loss/len(dataset)
+            # else:
+            #     return total_mse_loss/len(dataset)
         else:
             for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
@@ -527,7 +547,7 @@ def run(args):
     print("input_ids")
     input_ids = torch.LongTensor([example[0] for example in trainset])
     print("label_ids")
-    label_ids = torch.LongTensor([example[1] for example in trainset])
+    label_ids = torch.FloatTensor([example[1] for example in trainset])
     print("mask_ids")
     mask_ids = torch.LongTensor([example[2] for example in trainset])
     print("pos_ids")
@@ -541,6 +561,7 @@ def run(args):
     print("The number of training instances:", instances_num)
 
     param_optimizer = list(model.named_parameters())
+    # print('param_optimizer: ', param_optimizer)
     no_decay = ['bias', 'gamma', 'beta']
     optimizer_grouped_parameters = [
                 {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay_rate': 0.01},

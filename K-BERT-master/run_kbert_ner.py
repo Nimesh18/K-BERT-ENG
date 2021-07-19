@@ -15,6 +15,7 @@ from uer.utils.vocab import Vocab
 from uer.utils.seed import set_seed
 from uer.model_saver import save_model
 import numpy as np
+import time
 
 from brain import KnowledgeGraph
 
@@ -129,11 +130,25 @@ def main():
     # kg
     parser.add_argument("--kg_name", required=True, help="KG name or path")
 
+    # CPU switch
+    parser.add_argument("--cpu", required=False, default=False, help="Strictly use CPU or not")
+
+    # Connection URL for SQL DB
+    parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default="postgresql+psycopg2://@/postgres")
+
     args = parser.parse_args()
 
     # Load the hyperparameters of the config file.
     args = load_hyperparam(args)
 
+
+    # run experiment
+    start_time = time.perf_counter()
+    run(args)
+    end_time = time.perf_counter()
+    print(f"Time taken: {end_time - start_time:.2f} seconds")
+
+def run(args):
     set_seed(args.seed)
 
     labels_map = {"[PAD]": 0, "[ENT]": 1}
@@ -164,7 +179,7 @@ def main():
         spo_files = []
     else:
         spo_files = [args.kg_name]
-    kg = KnowledgeGraph(spo_files=spo_files, predicate=False)
+    kg = KnowledgeGraph(spo_files=spo_files, connurl=args.sqlconnectionurl, predicate=False)
 
     # Build bert model.
     # A pseudo target is added.
@@ -185,7 +200,7 @@ def main():
     model = BertTagger(args, model)
 
     # For simplicity, we use DataParallel wrapper to use multiple GPUs.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     if torch.cuda.device_count() > 1:
         print("{} GPUs are available. Let's use them.".format(torch.cuda.device_count()))
         model = nn.DataParallel(model)
