@@ -1,5 +1,8 @@
+import sys
 import time
 import torch
+import torch.nn as nn
+from uer.utils.constants import *
 from multiprocessing import Process, Pool, cpu_count
 import numpy as np
 
@@ -24,7 +27,7 @@ def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
         yield input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch
 
 
-def read_dataset(path, workers_num=1):
+def read_dataset(path, columns, kg, vocab, args, workers_num=1):
 
         print("Loading sentences from {}".format(path))
         sentences = []
@@ -53,16 +56,19 @@ def read_dataset(path, workers_num=1):
         return dataset
 
 
-
 # Evaluation function.
-def evaluate(args, is_test, metrics='Acc'):
+def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
     if is_test:
-        dataset = read_dataset(args.test_path, workers_num=args.workers_num)
+        dataset = read_dataset(args.test_path, columns, kg, vocab, args, workers_num=args.workers_num)
     else:
-        dataset = read_dataset(args.dev_path, workers_num=args.workers_num)
+        dataset = read_dataset(args.dev_path, columns, kg, vocab, args, workers_num=args.workers_num)
+    
 
     input_ids = torch.LongTensor([sample[0] for sample in dataset])
-    label_ids = torch.LongTensor([sample[1] for sample in dataset])
+    if args.labels_num == 1:
+        label_ids = torch.FloatTensor([sample[1] for sample in dataset]) 
+    else:
+        label_ids = torch.LongTensor([sample[1] for sample in dataset])
     mask_ids = torch.LongTensor([sample[2] for sample in dataset])
     pos_ids = torch.LongTensor([example[3] for example in dataset])
     vms = [example[4] for example in dataset]
@@ -78,7 +84,8 @@ def evaluate(args, is_test, metrics='Acc'):
 
     model.eval()
     
-    if not args.mean_reciprocal_rank:
+    if args.labels_num == 1:
+        total_mse_loss= 0
         for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
             # vms_batch = vms_batch.long()
@@ -99,33 +106,12 @@ def evaluate(args, is_test, metrics='Acc'):
                     print(vms_batch)
                     print(vms_batch.size())
 
-            logits = nn.Softmax(dim=1)(logits)
-            pred = torch.argmax(logits, dim=1)
-            gold = label_ids_batch
-            for j in range(pred.size()[0]):
-                confusion[pred[j], gold[j]] += 1
-            correct += torch.sum(pred == gold).item()
-    
-        if is_test:
-            print("Confusion matrix:")
-            print(confusion)
-            print("Report precision, recall, and f1:")
-        
-        for i in range(confusion.size()[0]):
-            p = confusion[i,i].item()/confusion[i,:].sum().item()
-            r = confusion[i,i].item()/confusion[:,i].sum().item()
-            f1 = 2*p*r / (p+r)
-            if i == 1:
-                label_1_f1 = f1
-            print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
-        print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
-        if metrics == 'Acc':
-            return correct/len(dataset)
-        elif metrics == 'f1':
-            return label_1_f1
-        else:
-            return correct/len(dataset)
-    else:
+            total_mse_loss += loss.item()
+            # print(f'Loss for batch {i} is {loss.item()}')
+        print(f"Total MSE Loss = {total_mse_loss:.3f}, batches = {i + 1}, Avg loss = {total_mse_loss/(i+1):.3f}")
+        return (i + 1) / total_mse_loss if total_mse_loss > 0 else float('inf')
+
+    elif args.mean_reciprocal_rank:
         for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
             vms_batch = torch.LongTensor(vms_batch)
@@ -220,11 +206,57 @@ def evaluate(args, is_test, metrics='Acc'):
         print("MRR", MRR)
         return MRR
 
+    else:
+        for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
+
+            # vms_batch = vms_batch.long()
+            vms_batch = torch.LongTensor(vms_batch)
+
+            input_ids_batch = input_ids_batch.to(device)
+            label_ids_batch = label_ids_batch.to(device)
+            mask_ids_batch = mask_ids_batch.to(device)
+            pos_ids_batch = pos_ids_batch.to(device)
+            vms_batch = vms_batch.to(device)
+
+            with torch.no_grad():
+                try:
+                    loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
+                except:
+                    print(input_ids_batch)
+                    print(input_ids_batch.size())
+                    print(vms_batch)
+                    print(vms_batch.size())
+
+            logits = nn.Softmax(dim=1)(logits)
+            pred = torch.argmax(logits, dim=1)
+            gold = label_ids_batch
+            for j in range(pred.size()[0]):
+                confusion[pred[j], gold[j]] += 1
+            correct += torch.sum(pred == gold).item()
+    
+        if is_test:
+            print("Confusion matrix:")
+            print(confusion)
+            print("Report precision, recall, and f1:")
+        
+        for i in range(confusion.size()[0]):
+            p = confusion[i,i].item()/confusion[i,:].sum().item()
+            r = confusion[i,i].item()/confusion[:,i].sum().item()
+            f1 = 2*p*r / (p+r)
+            if i == 1:
+                label_1_f1 = f1
+            print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
+        print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
+        if metrics == 'f1':
+            return label_1_f1
+        else:
+            return correct/len(dataset)
+
 
 def add_knowledge_worker(params):
 
     p_id, sentences, columns, kg, vocab, args = params
-    print(columns)
+    # print(columns)
     sentences_num = len(sentences)
     dataset = []
     for line_id, line in enumerate(sentences):
@@ -248,7 +280,7 @@ def add_knowledge_worker(params):
                 dataset.append((token_ids, label, mask, pos, vm))
             
             elif len(line) == 3:
-                label = int(line[columns["label"]])
+                label = float(line[columns["label"]]) if args.labels_num == 1 else int(line[columns["label"]])
                 text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
 
                 tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)

@@ -20,11 +20,14 @@ class KnowledgeGraph(object):
     def __init__(self, spo_files, connurl, predicate=False):
         self.predicate = predicate
         self.spo_file_paths = [config.KGS.get(f, f) for f in spo_files]
-        if config.ENGLISH_KGS not in spo_files:
+        
+        if all(e not in spo_files for e in config.ENGLISH_KGS):
+            print('using pkuseg')
             self.lookup_table = self._create_lookup_table()
             self.segment_vocab = list(self.lookup_table.keys()) + config.NEVER_SPLIT_TAG
             self.tokenizer = pkuseg.pkuseg(model_name="default", postag=False, user_dict=self.segment_vocab)
         else:
+            print('using BertTokenizer')
             self.lookup_table = Database(connurl, predicate)
             self.segment_vocab = self.lookup_table.get_all_subjects_subset() + config.NEVER_SPLIT_TAG
             self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased', never_split=self.segment_vocab)
@@ -88,14 +91,14 @@ class KnowledgeGraph(object):
                     token_pos_idx = [pos_idx+1]
                     token_abs_idx = [abs_idx+1]
                 else:
-                    token_pos_idx = [pos_idx+i for i in range(1, len(token)+1)]
+                    token_pos_idx = [pos_idx+i for i in range(1, len(token)+1)] # CHANGE
                     token_abs_idx = [abs_idx+i for i in range(1, len(token)+1)]
                 abs_idx = token_abs_idx[-1]
 
                 entities_pos_idx = []
                 entities_abs_idx = []
                 for ent in entities:
-                    ent_pos_idx = [token_pos_idx[-1] + i for i in range(1, len(ent)+1)]
+                    ent_pos_idx = [token_pos_idx[-1] + i for i in range(1, len(ent)+1)] #CHANGE
                     entities_pos_idx.append(ent_pos_idx)
                     ent_abs_idx = [abs_idx + i for i in range(1, len(ent)+1)]
                     abs_idx = ent_abs_idx[-1]

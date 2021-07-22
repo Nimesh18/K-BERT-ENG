@@ -22,6 +22,7 @@ from brain import KnowledgeGraph
 from multiprocessing import Process, Pool
 import numpy as np
 import time
+from common.utils import *
 
 
 class BertClassifier(nn.Module):
@@ -73,85 +74,6 @@ class BertClassifier(nn.Module):
         # print("logits.shape", logits.size())
         return loss, logits
 
-
-def add_knowledge_worker(params):
-
-    p_id, sentences, columns, kg, vocab, args = params
-    print(columns)
-    sentences_num = len(sentences)
-    dataset = []
-    for line_id, line in enumerate(sentences):
-        if line_id % 10000 == 0:
-            print("Progress of process {}: {}/{}".format(p_id, line_id, sentences_num))
-            sys.stdout.flush()
-        line = line.strip().split('\t')
-        try:
-            if len(line) == 2:
-                label = int(line[columns["label"]])
-                text = CLS_TOKEN + line[columns["text_a"]]
-   
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = [1 if t != PAD_TOKEN else 0 for t in tokens]
-
-                dataset.append((token_ids, label, mask, pos, vm))
-            
-            elif len(line) == 3:
-                label = float(line[columns["label"]])
-                text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
-
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = []
-                seg_tag = 1
-                for t in tokens:
-                    if t == PAD_TOKEN:
-                        mask.append(0)
-                    else:
-                        mask.append(seg_tag)
-                    if t == SEP_TOKEN:
-                        seg_tag += 1
-
-                dataset.append((token_ids, label, mask, pos, vm))
-            
-            elif len(line) == 4:  # for dbqa
-                qid=int(line[columns["qid"]])
-                label = int(line[columns["label"]])
-                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
-                text = CLS_TOKEN + text_a + SEP_TOKEN + text_b + SEP_TOKEN
-
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = []
-                seg_tag = 1
-                for t in tokens:
-                    if t == PAD_TOKEN:
-                        mask.append(0)
-                    else:
-                        mask.append(seg_tag)
-                    if t == SEP_TOKEN:
-                        seg_tag += 1
-                
-                dataset.append((token_ids, label, mask, pos, vm, qid))
-            else:
-                pass
-            
-        except Exception as e:
-            print("Error line: ", line, e)
-            raise ValueError
-    return dataset
 
 
 def main():
@@ -302,25 +224,6 @@ def run(args):
 
     model = model.to(device)
     
-    # Datset loader.
-    def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
-        instances_num = input_ids.size()[0]
-        for i in range(instances_num // batch_size):
-            input_ids_batch = input_ids[i*batch_size: (i+1)*batch_size, :]
-            label_ids_batch = label_ids[i*batch_size: (i+1)*batch_size]
-            mask_ids_batch = mask_ids[i*batch_size: (i+1)*batch_size, :]
-            pos_ids_batch = pos_ids[i*batch_size: (i+1)*batch_size, :]
-            vms_batch = vms[i*batch_size: (i+1)*batch_size]
-            yield input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch
-        if instances_num > instances_num // batch_size * batch_size:
-            input_ids_batch = input_ids[instances_num//batch_size*batch_size:, :]
-            label_ids_batch = label_ids[instances_num//batch_size*batch_size:]
-            mask_ids_batch = mask_ids[instances_num//batch_size*batch_size:, :]
-            pos_ids_batch = pos_ids[instances_num//batch_size*batch_size:, :]
-            vms_batch = vms[instances_num//batch_size*batch_size:]
-
-            yield input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch
-
     # Build knowledge graph.
     if args.kg_name == 'none':
         spo_files = []
@@ -328,217 +231,17 @@ def run(args):
         spo_files = [args.kg_name]
     kg = KnowledgeGraph(spo_files=spo_files, connurl=args.sqlconnectionurl, predicate=True)
 
-    def read_dataset(path, workers_num=1):
-
-        print("Loading sentences from {}".format(path))
-        sentences = []
-        with open(path, mode='r', encoding="utf-8") as f:
-            for line_id, line in enumerate(f):
-                if line_id == 0:
-                    continue
-                sentences.append(line)
-        sentence_num = len(sentences)
-
-        print("There are {} sentence in total. We use {} processes to inject knowledge into sentences.".format(sentence_num, workers_num))
-        if workers_num > 1:
-            params = []
-            sentence_per_block = int(sentence_num / workers_num) + 1
-            for i in range(workers_num):
-                params.append((i, sentences[i*sentence_per_block: (i+1)*sentence_per_block], columns, kg, vocab, args))
-            pool = Pool(workers_num)
-            res = pool.map(add_knowledge_worker, params)
-            pool.close()
-            pool.join()
-            dataset = [sample for block in res for sample in block]
-        else:
-            params = (0, sentences, columns, kg, vocab, args)
-            dataset = add_knowledge_worker(params)
-
-        return dataset
-
-    # Evaluation function.
-    def evaluate(args, is_test, metrics='Acc'):
-        if is_test:
-            dataset = read_dataset(args.test_path, workers_num=args.workers_num)
-        else:
-            dataset = read_dataset(args.dev_path, workers_num=args.workers_num)
-            # dataset.append((token_ids, label, mask, pos, vm))
-
-        input_ids = torch.LongTensor([sample[0] for sample in dataset])
-        label_ids = torch.FloatTensor([sample[1] for sample in dataset])
-        mask_ids = torch.LongTensor([sample[2] for sample in dataset])
-        pos_ids = torch.LongTensor([example[3] for example in dataset])
-        vms = [example[4] for example in dataset]
-        # print('vms:', vms)
-
-        batch_size = args.batch_size
-        instances_num = input_ids.size()[0]
-        if is_test:
-            print("The number of evaluation instances: ", instances_num)
-
-        # correct = 0
-        # Confusion matrix.
-        # confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)
-
-        model.eval()
-        
-        total_mse_loss= 0
-        if not args.mean_reciprocal_rank:
-            for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
-
-                # vms_batch = vms_batch.long()
-                vms_batch = torch.LongTensor(vms_batch)
-
-                input_ids_batch = input_ids_batch.to(device)
-                label_ids_batch = label_ids_batch.to(device)
-                mask_ids_batch = mask_ids_batch.to(device)
-                pos_ids_batch = pos_ids_batch.to(device)
-                vms_batch = vms_batch.to(device)
-
-                with torch.no_grad():
-                    try:
-                        loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
-                    except:
-                        print(input_ids_batch)
-                        print(input_ids_batch.size())
-                        print(vms_batch)
-                        print(vms_batch.size())
-
-                total_mse_loss += loss.item()
-                # logits = nn.Softmax(dim=1)(logits)
-                # pred = torch.argmax(logits, dim=1)
-                # pred = logits
-                # gold = label_ids_batch
-                # for j in range(pred.size()[0]):
-                #     confusion[pred[j], gold[j]] += 1
-                # correct += torch.sum(pred == gold).item()
-        
-            # if is_test:
-            #     print("Confusion matrix:")
-            #     print(confusion)
-            #     print("Report precision, recall, and f1:")
-            
-            # for i in range(confusion.size()[0]):
-            #     p = confusion[i,i].item()/confusion[i,:].sum().item()
-            #     r = confusion[i,i].item()/confusion[:,i].sum().item()
-            #     f1 = 2*p*r / (p+r)
-            #     if i == 1:
-            #         label_1_f1 = f1
-            #     print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
-            # print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
-            print(f"Total MSE Loss = {total_mse_loss:.3f}, batches = {i + 1}, Avg loss = {total_mse_loss/(i+1):.3f}")
-            return total_mse_loss/(i + 1)
-
-            # if metrics == 'Acc':
-            # elif metrics == 'f1':
-            #     return total_mse_loss/len(dataset)
-            # else:
-            #     return total_mse_loss/len(dataset)
-        else:
-            for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
-
-                vms_batch = torch.LongTensor(vms_batch)
-
-                input_ids_batch = input_ids_batch.to(device)
-                label_ids_batch = label_ids_batch.to(device)
-                mask_ids_batch = mask_ids_batch.to(device)
-                pos_ids_batch = pos_ids_batch.to(device)
-                vms_batch = vms_batch.to(device)
-
-                with torch.no_grad():
-                    loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
-                logits = nn.Softmax(dim=1)(logits)
-                if i == 0:
-                    logits_all=logits
-                if i >= 1:
-                    logits_all=torch.cat((logits_all,logits),0)
-        
-            order = -1
-            gold = []
-            for i in range(len(dataset)):
-                qid = dataset[i][-1]
-                label = dataset[i][1]
-                if qid == order:
-                    j += 1
-                    if label == 1:
-                        gold.append((qid,j))
-                else:
-                    order = qid
-                    j = 0
-                    if label == 1:
-                        gold.append((qid,j))
-
-            label_order = []
-            order = -1
-            for i in range(len(gold)):
-                if gold[i][0] == order:
-                    templist.append(gold[i][1])
-                elif gold[i][0] != order:
-                    order=gold[i][0]
-                    if i > 0:
-                        label_order.append(templist)
-                    templist = []
-                    templist.append(gold[i][1])
-            label_order.append(templist)
-
-            order = -1
-            score_list = []
-            for i in range(len(logits_all)):
-                score = float(logits_all[i][1])
-                qid=int(dataset[i][-1])
-                if qid == order:
-                    templist.append(score)
-                else:
-                    order = qid
-                    if i > 0:
-                        score_list.append(templist)
-                    templist = []
-                    templist.append(score)
-            score_list.append(templist)
-
-            rank = []
-            pred = []
-            print(len(score_list))
-            print(len(label_order))
-            for i in range(len(score_list)):
-                if len(label_order[i])==1:
-                    if label_order[i][0] < len(score_list[i]):
-                        true_score = score_list[i][label_order[i][0]]
-                        score_list[i].sort(reverse=True)
-                        for j in range(len(score_list[i])):
-                            if score_list[i][j] == true_score:
-                                rank.append(1 / (j + 1))
-                    else:
-                        rank.append(0)
-
-                else:
-                    true_rank = len(score_list[i])
-                    for k in range(len(label_order[i])):
-                        if label_order[i][k] < len(score_list[i]):
-                            true_score = score_list[i][label_order[i][k]]
-                            temp = sorted(score_list[i],reverse=True)
-                            for j in range(len(temp)):
-                                if temp[j] == true_score:
-                                    if j < true_rank:
-                                        true_rank = j
-                    if true_rank < len(score_list[i]):
-                        rank.append(1 / (true_rank + 1))
-                    else:
-                        rank.append(0)
-            MRR = sum(rank) / len(rank)
-            print("MRR", MRR)
-            return MRR
 
     # Training phase.
     print("Start training.")
     ss = time.perf_counter()
-    trainset = read_dataset(args.train_path, workers_num=args.workers_num)
+    trainset = read_dataset(args.train_path, columns, kg, vocab, args, workers_num=args.workers_num)
     ee = time.perf_counter()
     print("Shuffling dataset")
     print(f'Time taken: {ee-ss}s')
-    # uu = True
-    # if uu:
-    #     return 0
+    eg1_tokens = kg.tokenizer.convert_ids_to_tokens(trainset[0][0])
+    eg1_text = kg.tokenizer.convert_tokens_to_string(eg1_tokens)
+    
     random.shuffle(trainset)
     instances_num = len(trainset)
     batch_size = args.batch_size
@@ -598,7 +301,7 @@ def run(args):
             optimizer.step()
 
         print("Start evaluation on dev dataset.")
-        result = evaluate(args, False)
+        result = evaluate(model, device, args, False, columns, kg, vocab)
         if result > best_result:
             best_result = result
             save_model(model, args.output_model_path)
@@ -606,7 +309,7 @@ def run(args):
             continue
 
         print("Start evaluation on test dataset.")
-        evaluate(args, True)
+        evaluate(model, device, args, True, columns, kg, vocab)
 
     # Evaluation phase.
     print("Final evaluation on the test dataset.")
@@ -615,7 +318,7 @@ def run(args):
         model.module.load_state_dict(torch.load(args.output_model_path))
     else:
         model.load_state_dict(torch.load(args.output_model_path))
-    evaluate(args, True)
+    evaluate(model, device, args, True, columns, kg, vocab)
 
 
 if __name__ == "__main__":
