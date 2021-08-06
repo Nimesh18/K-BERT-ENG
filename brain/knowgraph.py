@@ -8,7 +8,7 @@ from numpy.lib.arraysetops import isin
 import brain.config as config
 import pkuseg
 import numpy as np
-from database.db import Database
+from database import Database
 from transformers import BertTokenizer
 
 
@@ -20,6 +20,8 @@ class KnowledgeGraph(object):
     def __init__(self, spo_files, connurl, predicate=False):
         self.predicate = predicate
         self.spo_file_paths = [config.KGS.get(f, f) for f in spo_files]
+        self.connurl = connurl
+        self.predicate = predicate
         
         if all(e not in spo_files for e in config.ENGLISH_KGS):
             print('using pkuseg')
@@ -30,6 +32,7 @@ class KnowledgeGraph(object):
             print('using BertTokenizer')
             self.lookup_table = Database(connurl, predicate)
             self.segment_vocab = self.lookup_table.get_all_subjects_subset() + config.NEVER_SPLIT_TAG
+            self.lookup_table = None
             self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased', never_split=self.segment_vocab)
         self.special_tags = set(config.NEVER_SPLIT_TAG)
 
@@ -53,7 +56,7 @@ class KnowledgeGraph(object):
                         lookup_table[subj] = set([value])
         return lookup_table
 
-    def add_knowledge_with_vm(self, sent_batch, max_entities=config.MAX_ENTITIES, add_pad=True, max_length=128):
+    def add_knowledge_with_vm(self, sent_batch, named_entities, max_entities=config.MAX_ENTITIES, add_pad=True, max_length=128):
         """
         input: sent_batch - list of sentences, e.g., ["abcd", "efgh"]
         return: know_sent_batch - list of sentences with entites embedding
@@ -61,8 +64,10 @@ class KnowledgeGraph(object):
                 visible_matrix_batch - list of visible matrixs
                 seg_batch - list of segment tags
         """
+        self.lookup_table = Database(self.connurl, self.predicate)
         if isinstance(self.tokenizer, BertTokenizer):
             split_sent_batch = [self.tokenizer.tokenize(sent) for sent in sent_batch]
+            split_entity_batch = [self.tokenizer.tokenize(named_entity) for named_entity in named_entities]
         else:
             split_sent_batch = [self.tokenizer.cut(sent) for sent in sent_batch]
         know_sent_batch = []
@@ -81,7 +86,10 @@ class KnowledgeGraph(object):
             for token in split_sent:
 
                 if isinstance(self.lookup_table, Database):
-                    entities = list(self.lookup_table.get(token, max_entities))
+                    # entities = list(self.lookup_table.get(token, max_entities)) if token in split_entity_batch else []
+                    entities = []
+                    if any([token in entity_batch for entity_batch in split_entity_batch]):
+                        entities = list(self.lookup_table.get(token, max_entities))
                 else:
                     entities = list(self.lookup_table.get(token, []))[:max_entities]
 
@@ -91,16 +99,19 @@ class KnowledgeGraph(object):
                     token_pos_idx = [pos_idx+1]
                     token_abs_idx = [abs_idx+1]
                 else:
-                    token_pos_idx = [pos_idx+i for i in range(1, len(token)+1)] # CHANGE
-                    token_abs_idx = [abs_idx+i for i in range(1, len(token)+1)]
+                    token_pos_idx = [pos_idx+1] # CHANGE
+                    token_abs_idx = [abs_idx+1]
+                    # token_pos_idx = [pos_idx+i for i in range(1, len(token)+1)] # CHANGE
+                    # token_abs_idx = [abs_idx+i for i in range(1, len(token)+1)]
                 abs_idx = token_abs_idx[-1]
 
                 entities_pos_idx = []
                 entities_abs_idx = []
                 for ent in entities:
-                    ent_pos_idx = [token_pos_idx[-1] + i for i in range(1, len(ent)+1)] #CHANGE
+                    tokenized_entities = self.tokenizer.tokenize(ent)
+                    ent_pos_idx = [token_pos_idx[-1] + i for i in range(1, len(tokenized_entities)+1)] # CHANGE
                     entities_pos_idx.append(ent_pos_idx)
-                    ent_abs_idx = [abs_idx + i for i in range(1, len(ent)+1)]
+                    ent_abs_idx = [abs_idx + i for i in range(1, len(tokenized_entities) + 1)]
                     abs_idx = ent_abs_idx[-1]
                     entities_abs_idx.append(ent_abs_idx)
 
@@ -119,20 +130,21 @@ class KnowledgeGraph(object):
                     know_sent += [word]
                     seg += [0]
                 else:
-                    add_word = list(word)
-                    know_sent += add_word 
-                    seg += [0] * len(add_word)
+                    # add_word = list(word)
+                    add_word = word
+                    know_sent.append(add_word)
+                    seg += [0]
                 pos += pos_idx_tree[i][0]
                 for j in range(len(sent_tree[i][1])):
-                    add_word = list(sent_tree[i][1][j])
+                    add_word = self.tokenizer.tokenize(sent_tree[i][1][j])
                     know_sent += add_word
-                    seg += [1] * len(add_word)
+                    seg += [1]
                     pos += list(pos_idx_tree[i][1][j])
 
             token_num = len(know_sent)
 
             # Calculate visible matrix
-            visible_matrix = np.zeros((token_num, token_num))
+            visible_matrix = np.zeros((token_num, token_num), dtype=int)
             for item in abs_idx_tree:
                 src_ids = item[0]
                 for id in src_ids:
@@ -143,8 +155,10 @@ class KnowledgeGraph(object):
                         visible_abs_idx = ent + src_ids
                         visible_matrix[id, visible_abs_idx] = 1
 
-            src_length = len(know_sent)
-            if len(know_sent) < max_length:
+            src_length = token_num
+
+            # assert src_length == token_num
+            if src_length < max_length:
                 pad_num = max_length - src_length
                 know_sent += [config.PAD_TOKEN] * pad_num
                 seg += [0] * pad_num

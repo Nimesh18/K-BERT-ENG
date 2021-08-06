@@ -98,3 +98,6 @@ ENV/
 # data
 *_results.tsv
 *.out
+*_strings.csv
+run_test.py
+run_test.ipynb

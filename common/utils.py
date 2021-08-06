@@ -1,10 +1,9 @@
 import sys
-import time
 import torch
 import torch.nn as nn
 from uer.utils.constants import *
 from multiprocessing import Process, Pool, cpu_count
-import numpy as np
+import spacy
 
 
 # Datset loader.
@@ -27,7 +26,92 @@ def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
         yield input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch
 
 
+def add_knowledge_worker(params):
+
+    p_id, sentences, named_entities, columns, kg, vocab, args = params
+    # print(columns)
+    sentences_num = len(sentences)
+    dataset = []
+    for line_id, (line, entities) in enumerate(zip(sentences, named_entities)):
+        if line_id % 1000 == 0:
+            print("Progress of process {}: {}/{}".format(p_id, line_id, sentences_num))
+            sys.stdout.flush()
+        line = line.strip().split('\t')
+        try:
+            if len(line) == 2:
+                label = int(line[columns["label"]])
+                text = CLS_TOKEN + line[columns["text_a"]]
+   
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens = tokens[0]
+                pos = pos[0]
+                vm = vm[0]
+
+                token_ids = [vocab.get(t) for t in tokens]
+                mask = [1 if t != PAD_TOKEN else 0 for t in tokens]
+
+                dataset.append((token_ids, label, mask, pos, vm))
+            
+            elif len(line) == 3:
+                # for sts normalize to between 0 and 1 by dividing by 5
+                label = float(line[columns["label"]])/5.0 if args.labels_num == 1 else int(line[columns["label"]])
+                text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
+
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens = tokens[0]
+                pos = pos[0]
+                vm = vm[0]
+
+                token_ids = [vocab.get(t) for t in tokens]
+
+                mask = []
+                seg_tag = 1
+                for t in tokens:
+                    if t == PAD_TOKEN:
+                        mask.append(0)
+                    else:
+                        mask.append(seg_tag)
+                    if t == SEP_TOKEN:
+                        seg_tag += 1
+
+                dataset.append((token_ids, label, mask, pos, vm))
+            
+            elif len(line) == 4:  # for dbqa
+                qid=int(line[columns["qid"]])
+                label = int(line[columns["label"]])
+                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
+                text = CLS_TOKEN + text_a + SEP_TOKEN + text_b + SEP_TOKEN
+
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens = tokens[0]
+                pos = pos[0]
+                vm = vm[0]
+
+                token_ids = [vocab.get(t) for t in tokens]
+                mask = []
+                seg_tag = 1
+                for t in tokens:
+                    if t == PAD_TOKEN:
+                        mask.append(0)
+                    else:
+                        mask.append(seg_tag)
+                    if t == SEP_TOKEN:
+                        seg_tag += 1
+                
+                dataset.append((token_ids, label, mask, pos, vm, qid))
+            else:
+                pass
+            
+        except Exception as e:
+            print("Error line: ", line, e)
+            raise ValueError
+    return dataset
+
+
 def read_dataset(path, columns, kg, vocab, args, workers_num=1):
+
+        # Spacy setup
+        nlp = spacy.load("en_core_web_sm", exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
 
         print("Loading sentences from {}".format(path))
         sentences = []
@@ -38,19 +122,25 @@ def read_dataset(path, columns, kg, vocab, args, workers_num=1):
                 sentences.append(line)
         sentence_num = len(sentences)
 
+        # processed = nlp.pipe(sentences, disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
+        processed = nlp.pipe(sentences)
+
+        named_entities = list(map(lambda x: [a.text for a in x.ents], list(processed)))
+
         print("There are {} sentence in total. We use {} processes to inject knowledge into sentences.".format(sentence_num, workers_num))
         if workers_num > 1:
             params = []
             sentence_per_block = int(sentence_num / workers_num) + 1
             for i in range(workers_num):
-                params.append((i, sentences[i*sentence_per_block: (i+1)*sentence_per_block], columns, kg, vocab, args))
+                params.append((i, sentences[i*sentence_per_block: (i+1)*sentence_per_block], 
+                named_entities[i*sentence_per_block: (i+1)*sentence_per_block], columns, kg, vocab, args))
             pool = Pool(workers_num)
             res = pool.map(add_knowledge_worker, params)
             pool.close()
             pool.join()
             dataset = [sample for block in res for sample in block]
         else:
-            params = (0, sentences, columns, kg, vocab, args)
+            params = (0, sentences, named_entities, columns, kg, vocab, args)
             dataset = add_knowledge_worker(params)
 
         return dataset
@@ -253,81 +343,10 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
             return correct/len(dataset)
 
 
-def add_knowledge_worker(params):
-
-    p_id, sentences, columns, kg, vocab, args = params
-    # print(columns)
-    sentences_num = len(sentences)
-    dataset = []
-    for line_id, line in enumerate(sentences):
-        if line_id % 10000 == 0:
-            print("Progress of process {}: {}/{}".format(p_id, line_id, sentences_num))
-            sys.stdout.flush()
-        line = line.strip().split('\t')
-        try:
-            if len(line) == 2:
-                label = int(line[columns["label"]])
-                text = CLS_TOKEN + line[columns["text_a"]]
-   
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = [1 if t != PAD_TOKEN else 0 for t in tokens]
-
-                dataset.append((token_ids, label, mask, pos, vm))
-            
-            elif len(line) == 3:
-                label = float(line[columns["label"]]) if args.labels_num == 1 else int(line[columns["label"]])
-                text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
-
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = []
-                seg_tag = 1
-                for t in tokens:
-                    if t == PAD_TOKEN:
-                        mask.append(0)
-                    else:
-                        mask.append(seg_tag)
-                    if t == SEP_TOKEN:
-                        seg_tag += 1
-
-                dataset.append((token_ids, label, mask, pos, vm))
-            
-            elif len(line) == 4:  # for dbqa
-                qid=int(line[columns["qid"]])
-                label = int(line[columns["label"]])
-                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
-                text = CLS_TOKEN + text_a + SEP_TOKEN + text_b + SEP_TOKEN
-
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0].astype("bool")
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = []
-                seg_tag = 1
-                for t in tokens:
-                    if t == PAD_TOKEN:
-                        mask.append(0)
-                    else:
-                        mask.append(seg_tag)
-                    if t == SEP_TOKEN:
-                        seg_tag += 1
-                
-                dataset.append((token_ids, label, mask, pos, vm, qid))
-            else:
-                pass
-            
-        except Exception as e:
-            print("Error line: ", line, e)
-            raise ValueError
-    return dataset
+# import csv
+def convert_ids_to_string(ids, tokenizer, filename="input_ids_string.csv"):
+    with open(filename, mode='a', encoding='utf-8') as fd:
+        # for id in ids:
+        tokens = tokenizer.convert_ids_to_tokens(ids)
+        token_strings = tokenizer.convert_tokens_to_string(tokens)
+        fd.write(token_strings + "\n")
