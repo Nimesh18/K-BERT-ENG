@@ -7,10 +7,11 @@ KGS = {
     'HowNet': os.path.join(FILE_DIR_PATH, 'kgs/HowNet.spo'),
     'CnDbpedia': os.path.join(FILE_DIR_PATH, 'kgs/CnDbpedia.spo'),
     'Medical': os.path.join(FILE_DIR_PATH, 'kgs/Medical.spo'),
-    'YAGO': os.path.join(FILE_DIR_PATH, 'kgs/YAGO.spo'),
 }
 
-ENGLISH_KGS = ['YAGO'] # later add ConceptNet
+YAGO = 'YAGO'
+CONCEPTNET = 'ConceptNet'
+ENGLISH_KGS = [YAGO, CONCEPTNET] # later add ConceptNet
 MAX_ENTITIES = 2
 
 # Special token words.

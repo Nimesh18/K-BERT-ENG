@@ -1,9 +1,13 @@
 import sys
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
+from common.processing.attention import SelfAttention
 from uer.utils.constants import *
 from multiprocessing import Process, Pool, cpu_count
 import spacy
+import time
+
 
 
 # Datset loader.
@@ -29,11 +33,12 @@ def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
 def add_knowledge_worker(params):
 
     p_id, sentences, named_entities, columns, kg, vocab, args = params
-    # print(columns)
+    
     sentences_num = len(sentences)
+    progress_step = int(sentences_num * 0.1)
     dataset = []
     for line_id, (line, entities) in enumerate(zip(sentences, named_entities)):
-        if line_id % 1000 == 0:
+        if line_id % progress_step == 0:
             print("Progress of process {}: {}/{}".format(p_id, line_id, sentences_num))
             sys.stdout.flush()
         line = line.strip().split('\t')
@@ -42,7 +47,7 @@ def add_knowledge_worker(params):
                 label = int(line[columns["label"]])
                 text = CLS_TOKEN + line[columns["text_a"]]
    
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
                 tokens = tokens[0]
                 pos = pos[0]
                 vm = vm[0]
@@ -55,9 +60,11 @@ def add_knowledge_worker(params):
             elif len(line) == 3:
                 # for sts normalize to between 0 and 1 by dividing by 5
                 label = float(line[columns["label"]])/5.0 if args.labels_num == 1 else int(line[columns["label"]])
-                text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
+                # text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
+                text = [line[columns["text_a"]], line[columns["text_b"]]]
+                # print(text)
 
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
                 tokens = tokens[0]
                 pos = pos[0]
                 vm = vm[0]
@@ -82,7 +89,7 @@ def add_knowledge_worker(params):
                 text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
                 text = CLS_TOKEN + text_a + SEP_TOKEN + text_b + SEP_TOKEN
 
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities[1:], add_pad=True, max_length=args.seq_length)
+                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
                 tokens = tokens[0]
                 pos = pos[0]
                 vm = vm[0]
@@ -110,8 +117,7 @@ def add_knowledge_worker(params):
 
 def read_dataset(path, columns, kg, vocab, args, workers_num=1):
 
-        # Spacy setup
-        nlp = spacy.load("en_core_web_sm", exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
+        
 
         print("Loading sentences from {}".format(path))
         sentences = []
@@ -122,10 +128,13 @@ def read_dataset(path, columns, kg, vocab, args, workers_num=1):
                 sentences.append(line)
         sentence_num = len(sentences)
 
-        # processed = nlp.pipe(sentences, disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
-        processed = nlp.pipe(sentences)
 
-        named_entities = list(map(lambda x: [a.text for a in x.ents], list(processed)))
+        start_time = time.perf_counter()
+        named_entities = get_entities(sentences, args)
+        # print_named_entity_stats(named_entities)
+        end_time = time.perf_counter()
+
+        print('time for processing entities:', end_time - start_time)
 
         print("There are {} sentence in total. We use {} processes to inject knowledge into sentences.".format(sentence_num, workers_num))
         if workers_num > 1:
@@ -145,6 +154,43 @@ def read_dataset(path, columns, kg, vocab, args, workers_num=1):
 
         return dataset
 
+def get_entities(sentences, args):
+
+    entity_recognition = args.entity_recognition
+    if entity_recognition == "spacy":
+        # Spacy setup
+        nlp = spacy.load("en_core_web_sm", exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
+        
+        sentences = list(map(lambda x: x[x.index("\t"):], sentences))
+        processed = nlp.pipe(sentences)
+
+        named_entities = list(map(lambda x: [a.text for a in x.ents], list(processed)))
+        # named_entities = list(filter(lambda x: not x.isdigit(), named_entities))
+
+    elif entity_recognition == "attention":
+        dataloader = DataLoader(sentences, batch_size=128)
+
+        attention = SelfAttention()
+        named_entities = []
+        for sentence_batch in dataloader:
+            named_entities.extend(attention.get_entities_via_attention(sentence_batch))
+
+        n = args.attention_n
+        named_entities = list(map(lambda x: list(set(x)), named_entities))
+        named_entities = list(map(lambda x: x[:min(len(x), n)], named_entities))
+    else:
+        named_entities = list(map(lambda x: [], sentences))
+
+    named_entities = [list(filter(lambda x: not x.isdigit(), group)) for group in named_entities]
+
+    return named_entities
+
+def print_named_entity_stats(named_entities):
+    lens = list(map(lambda x: len(x), named_entities))
+    print('entity stats:')
+    print(f'max len: {max(lens)}')        
+    print(f'min len: {min(lens)}')        
+    print(f'average len: {sum(lens)/len(lens)}')        
 
 # Evaluation function.
 def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):

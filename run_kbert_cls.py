@@ -140,10 +140,20 @@ def main():
     parser.add_argument("--no_vm", action="store_true", help="Disable the visible_matrix")
 
     # CPU switch
-    parser.add_argument("--cpu", required=False, default=False, help="Strictly use CPU or not")
+    parser.add_argument("--cpu", action="store_true", required=False, help="Strictly use CPU or not", default=False)
 
     # Connection URL for SQL DB
     parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default="postgresql+psycopg2://@/postgres")
+
+
+    parser.add_argument("--entity_recognition", choices=["spacy", "attention", "none"], default="spacy",
+                        help="Specify entity extraction method" 
+                             "Spacy NER"
+                             "Identify important words through self-attention"
+                             "Inject knowledge for every token in sentence"
+                             )
+    
+    parser.add_argument("--attention_n", required=False, type=int, help="Entity recognition param for attention - Get top n words", default=3)
 
     args = parser.parse_args()
 
@@ -203,6 +213,7 @@ def run(args):
 
     # For simplicity, we use DataParallel wrapper to use multiple GPUs.
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
+    print("Using device: ", device)
     if torch.cuda.device_count() > 1:
         print("{} GPUs are available. Let's use them.".format(torch.cuda.device_count()))
         model = nn.DataParallel(model)
@@ -221,25 +232,18 @@ def run(args):
     ss = time.perf_counter()
     trainset = read_dataset(args.train_path, columns, kg, vocab, args, workers_num=args.workers_num)
     ee = time.perf_counter()
+    print(f'Time taken to read training set: {ee-ss}s')
+    
     print("Shuffling dataset")
-    print(f'Time taken: {ee-ss}s')
-    # uu = True
-    # if uu:
-    #     return 0
     random.shuffle(trainset)
     instances_num = len(trainset)
     batch_size = args.batch_size
 
     print("Trans data to tensor.")
-    print("input_ids")
     input_ids = torch.LongTensor([example[0] for example in trainset])
-    print("label_ids")
     label_ids = torch.LongTensor([example[1] for example in trainset])
-    print("mask_ids")
     mask_ids = torch.LongTensor([example[2] for example in trainset])
-    print("pos_ids")
     pos_ids = torch.LongTensor([example[3] for example in trainset])
-    print("vms")
     vms = [example[4] for example in trainset]
 
     train_steps = int(instances_num * args.epochs_num / batch_size) + 1
@@ -258,8 +262,9 @@ def run(args):
     total_loss = 0.
     result = 0.0
     best_result = 0.0
-    
+    print('Begin training loop')
     for epoch in range(1, args.epochs_num+1):
+        train_loop_start = time.perf_counter()
         model.train()
         for i, (input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
             model.zero_grad()
@@ -283,7 +288,11 @@ def run(args):
             loss.backward()
             optimizer.step()
 
+        train_loop_end = time.perf_counter()
+        print(f'Time taken for epoch {epoch} in training loop: {train_loop_end - train_loop_start}')
         print("Start evaluation on dev dataset.")
+        eval_start = time.perf_counter()
+
         result = evaluate(model, device, args, False, columns, kg, vocab)
         if result > best_result:
             best_result = result
@@ -291,8 +300,15 @@ def run(args):
         else:
             continue
 
+        eval_end = time.perf_counter()
+        print(f'Evaluation on dev dataset time taken: {eval_end - eval_start}')
+
         print("Start evaluation on test dataset.")
+
+        test_start = time.perf_counter()
         evaluate(model, device, args, True, columns, kg, vocab)
+        test_end = time.perf_counter()
+        print(f'Evaluation on test dataset time taken: {test_end - test_start}')
 
     # Evaluation phase.
     print("Final evaluation on the test dataset.")

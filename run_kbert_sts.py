@@ -151,13 +151,22 @@ def main():
     parser.add_argument("--no_vm", action="store_true", help="Disable the visible_matrix")
 
     # CPU switch
-    parser.add_argument("--cpu", type=bool, required=False, default=False, help="Strictly use CPU or not")
+    parser.add_argument("--cpu", action="store_true", required=False, help="Strictly use CPU or not", default=False)
 
     # Connection URL for SQL DB
     parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default="postgresql+psycopg2://@/postgres")
 
     # Get number of labels
     parser.add_argument("--labels_num", required=False, type=int, help="Number of classes/labels. If regression problem, set to 1", default=-1)
+        
+    parser.add_argument("--entity_recognition", choices=["spacy", "attention", "none"], default="spacy",
+                        help="Specify entity extraction method" 
+                             "Spacy NER"
+                             "Identify important words through self-attention"
+                             "Inject knowledge for every token in sentence"
+                             )
+    
+    parser.add_argument("--attention_n", required=False, type=int, help="Entity recognition param for attention - Get top n words", default=3)
 
     args = parser.parse_args()
 
@@ -300,7 +309,7 @@ def run(args):
             pos_ids_batch = pos_ids_batch.to(device)
             vms_batch = vms_batch.to(device)
 
-            loss, _ = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos=pos_ids_batch, vm=vms_batch)
+            loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos=pos_ids_batch, vm=vms_batch)
             if torch.cuda.device_count() > 1:
                 loss = torch.mean(loss)
             total_loss += loss.item()

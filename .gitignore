@@ -101,3 +101,4 @@ ENV/
 *_strings.csv
 run_test.py
 run_test.ipynb
+environment requirements.txt
