@@ -102,3 +102,5 @@ ENV/
 run_test.py
 run_test.ipynb
 environment requirements.txt
+index/
+cache/

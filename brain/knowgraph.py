@@ -2,17 +2,12 @@
 """
 KnowledgeGraph
 """
-import os
-from re import search, escape
-
-from numpy.lib.arraysetops import isin
-import brain.config as config
-import pkuseg
 import numpy as np
+import brain.config as config
 from database import Database
 from transformers import BertTokenizerFast
 from common.embedding.transformer import RoBERTa
-from torch.utils.data import DataLoader
+from common.utils import group_related_tokens, sym_matrix_to_vec
 
 
 class KnowledgeGraph(object):
@@ -20,71 +15,33 @@ class KnowledgeGraph(object):
     spo_files - list of Path of *.spo files, or default kg name. e.g., ['HowNet']
     """
 
-    def __init__(self, spo_files, connurl, predicate=False):
-        self.spo_file_paths = [config.KGS.get(f, f) for f in spo_files]
+    def __init__(self, connurl, cache_path, cache_embedding_path, compute_embeddings=False):
         self.connurl = connurl
-        self.predicate = predicate
-        
-        if all(e not in spo_files for e in config.ENGLISH_KGS):
-            print('using pkuseg')
-            self.lookup_table = self._create_lookup_table()
-            self.segment_vocab = list(self.lookup_table.keys()) + config.NEVER_SPLIT_TAG
-            self.tokenizer = pkuseg.pkuseg(model_name="default", postag=False, user_dict=self.segment_vocab)
-        else:
-            print('using BertTokenizerFast')
-            self.lookup_table = Database(connurl, predicate, spo_files)
-            self.segment_vocab = config.NEVER_SPLIT_TAG
-            self.lookup_table = None
-            self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-cased', never_split=self.segment_vocab)
-            self.embedder = RoBERTa()
+        self.lookup_table = Database(connurl, cache_path, cache_embedding_path if not compute_embeddings else None)
+        self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', never_split=config.NEVER_SPLIT_TAG)
+        self.embedder = RoBERTa() if compute_embeddings else None
         self.special_tags = set(config.NEVER_SPLIT_TAG)
 
-    def _create_lookup_table(self):
-        lookup_table = {}
-        for spo_path in self.spo_file_paths:
-            print("[KnowledgeGraph] Loading spo from {}".format(spo_path))
-            with open(spo_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        subj, pred, obje = line.strip().split("\t")    
-                    except:
-                        print("[KnowledgeGraph] Bad spo:", line)
-                    if self.predicate:
-                        value = pred + obje
-                    else:
-                        value = obje
-                    if subj in lookup_table.keys():
-                        lookup_table[subj].add(value)
-                    else:
-                        lookup_table[subj] = set([value])
-        return lookup_table
-
-    def join_relevant_tokens(self, ch, sent, prefix='##'):
-        if sent[ch].startswith(prefix) or ch + 1 >= len(sent):
-            return sent[ch]
-        acc = [sent[ch]]
-        while ch < len(sent) - 1 and sent[ch + 1].startswith(prefix):
-            acc.append(sent[ch + 1].replace(prefix, ''))
-            ch+=1
-        return ''.join(acc)
+    def remove_trailing_padding(self, tokens, vm):
+        if config.PAD_TOKEN not in tokens:
+            return tokens, vm
+        
+        end = tokens.index(config.PAD_TOKEN)
+        return tokens[:end], vm[:end,:end]
 
 
-    def add_knowledge_with_vm(self, sent_batch, named_entities, max_entities=config.MAX_ENTITIES, add_pad=True, max_length=128):
+    def add_knowledge_with_vm(self, sent_batch, named_entities, seq=None, max_seq_len=None, max_length=128, threshold=0, e=None):
         """
         input: sent_batch - list of sentences, e.g., [["abcd", "abcd_pair"], ["efgh", "efgh_pair"]]
         return: know_sent_batch - list of sentences with entites embedding
                 position_batch - list of position index of each character.
-                visible_matrix_batch - list of visible matrixs
-                seg_batch - list of segment tags
+                visible_matrix_batch - list of visible matrices
         """
-        self.lookup_table = Database(self.connurl, self.predicate, self.spo_file_paths)
         split_sent_batch = [self.tokenizer(sent, text_pair=sent_pair) for sent, sent_pair in sent_batch]
-        # split_entity_batch = [self.tokenizer.tokenize(named_entity) for named_entity in named_entities]
 
         know_sent_batch = []
         position_batch = []
         visible_matrix_batch = []
-        seg_batch = []
         for sent, tokenized_sent in zip(sent_batch, split_sent_batch):
 
             # create tree
@@ -94,69 +51,44 @@ class KnowledgeGraph(object):
             pos_idx = -1
             abs_idx = -1
             abs_idx_src = []
-            charspans = RoBERTa.get_character_spans(tokenized_sent)
-            token_idx = 0
+            idx = -1
+            ents_len = 0
 
-            for idx, token in enumerate(tokenized_sent.tokens()):
+            token_groups, entity_match_idxs, matches = group_related_tokens(sent, tokenized_sent, named_entities)
 
-                # if isinstance(self.lookup_table, Database):
-                limit = 2 ** 11
-                offset = 0
+            for token_group_idx, token_group in enumerate(token_groups):
                 entities = []
-                maximum_values = []
-                maximum_ents = []
-                more_entities = True
-                sequence = None
-                word_embedding = None
-                tokenized_sent['input_ids'][idx]
-                if token not in self.special_tags:
-                    entity = self.join_relevant_tokens(idx, tokenized_sent.tokens())
-                    matches = []
-                    for entity_idx, named_entity in enumerate(named_entities):
-                        escaped = escape(entity)
-                        mt = search(rf'\b{escaped}\b', named_entity)
-                        if mt is not None:
-                            matches.append(entity_idx)
-                    # matches = [(search(rf'\b{entity}\b', es), group_idx, es_idx) for group_idx, group in enumerate(named_entities) for es_idx, es in enumerate(group)]
-                    if len(entity) > 1 and not entity.isdigit() and len(matches) > 0:
-                        # print('in here')
-                        entity = "_".join(named_entities[matches[0]].split())
-                        while more_entities:
-                            entities = list(self.lookup_table.search(entity, limit, offset))
-                            offset +=limit
-                            num_entities=len(entities)
-                            if num_entities > 0:
-                                dataloader = DataLoader(entities, batch_size=16)
-                                sentence_embeddings = []
-                                for e_batch in dataloader:
-                                    sentence_embeddings.extend(self.embedder.get_sentence_embedding(e_batch))
-                                if sequence is None or word_embedding is None:
-                                    sequence = tokenized_sent.token_to_sequence(idx)
-                                    word_embedding = self.embedder.get_embedding(token_idx, charspans, sent[sequence])
-                                max_idx, max_val = RoBERTa.get_most_similar(word_embedding, sentence_embeddings) # put max_entities in here
-                                maximum_ents.append(entities[max_idx])
-                                entities = [entities[max_idx]]
-                                maximum_values.append(max_val)
-                                print(f'#results: {num_entities}\ttoken: {token}\tentity to search: {entity}\tentities most similar: {entities}')
-                            else:
-                                more_entities = False
-                        if len(maximum_values) > 0:
-                            entities = [maximum_ents[np.argmax(maximum_values)]]
-                # entities = list(self.lookup_table.get(token, max_entities)) if token in split_entity_batch else []
-                # else:
-                #     entities = list(self.lookup_table.get(token, []))[:max_entities]
+                idx += len(token_group)
+                if token_group_idx in entity_match_idxs:
+                    match_idx = entity_match_idxs.index(token_group_idx)
+                    entity = matches[match_idx]
+                    sequence = tokenized_sent.token_to_sequence(idx)
+                    
+                    concepts, concept_embeddings = self.lookup_table.retrieve_wiki_concepts(entity)
+                    if len(concepts) > 0 and (seq is None or sequence == seq):
 
-                sent_tree.append((token, entities))
+                        if self.embedder is not None:
+                            instance_embeddings = self.embedder.get_sentence_embedding(list(map(lambda x: " ".join(x), concepts)))
+                            sent_embedding = self.embedder.get_sentence_embedding(sent[sequence]).squeeze()
+                        else:
+                            sent_embedding = e[sent[sequence].strip()]
+                            instance_embeddings = concept_embeddings
 
-                if token in self.special_tags:
-                    token_pos_idx = [pos_idx+1]
-                    token_abs_idx = [abs_idx+1]
-                else:
-                    token_idx +=1
-                    token_pos_idx = [pos_idx+1] # CHANGE
-                    token_abs_idx = [abs_idx+1]
-                    # token_pos_idx = [pos_idx+i for i in range(1, len(token)+1)] # CHANGE
-                    # token_abs_idx = [abs_idx+i for i in range(1, len(token)+1)]
+                        max_id, max_val = RoBERTa.get_most_similar(sent_embedding, instance_embeddings)
+
+                        if max_val > threshold:
+                            entities = concepts[max_id]
+                            if max_seq_len is not None:
+                                ents_len = ents_len + sum(list(map(lambda x: len(self.tokenizer.tokenize(x)), entities)))
+                                if ents_len + len(tokenized_sent.tokens()) >= max_seq_len:
+                                    entities = []
+
+
+                sent_tree.append((token_group, entities))
+
+                token_pos_idx = [pos_idx+i for i in range(1, len(token_group)+1)]
+                token_abs_idx = [abs_idx+i for i in range(1, len(token_group)+1)]
+
                 abs_idx = token_abs_idx[-1]
 
                 entities_pos_idx = []
@@ -169,6 +101,7 @@ class KnowledgeGraph(object):
                     abs_idx = ent_abs_idx[-1]
                     entities_abs_idx.append(ent_abs_idx)
 
+
                 pos_idx_tree.append((token_pos_idx, entities_pos_idx))
                 pos_idx = token_pos_idx[-1]
                 abs_idx_tree.append((token_abs_idx, entities_abs_idx))
@@ -177,28 +110,20 @@ class KnowledgeGraph(object):
             # Get know_sent and pos
             know_sent = []
             pos = []
-            seg = []
-            for i in range(len(sent_tree)):
-                word = sent_tree[i][0]
-                if word in self.special_tags:
-                    know_sent += [word]
-                    seg += [0]
-                else:
-                    # add_word = list(word)
-                    add_word = word
-                    know_sent.append(add_word)
-                    seg += [0]
+            for i, (t_group, ents) in enumerate(sent_tree):
+
+                know_sent += t_group
+
                 pos += pos_idx_tree[i][0]
-                for j in range(len(sent_tree[i][1])):
-                    add_word = self.tokenizer.tokenize(sent_tree[i][1][j])
+                for j, ent in enumerate(ents):
+                    add_word = self.tokenizer.tokenize(ent)
                     know_sent += add_word
-                    seg += [1]
                     pos += list(pos_idx_tree[i][1][j])
 
             token_num = len(know_sent)
 
             # Calculate visible matrix
-            visible_matrix = np.zeros((token_num, token_num), dtype=int)
+            visible_matrix = np.zeros((token_num, token_num), dtype=np.uint8)
             for item in abs_idx_tree:
                 src_ids = item[0]
                 for id in src_ids:
@@ -215,19 +140,73 @@ class KnowledgeGraph(object):
             if src_length < max_length:
                 pad_num = max_length - src_length
                 know_sent += [config.PAD_TOKEN] * pad_num
-                seg += [0] * pad_num
                 pos += [max_length - 1] * pad_num
                 visible_matrix = np.pad(visible_matrix, ((0, pad_num), (0, pad_num)), 'constant')  # pad 0
             else:
-                know_sent = know_sent[:max_length]
-                seg = seg[:max_length]
-                pos = pos[:max_length]
-                visible_matrix = visible_matrix[:max_length, :max_length]
-            
+                try:
+                    sep_pos = know_sent.index(config.SEP_TOKEN)
+                    len1 = sep_pos + 1
+                    half = max_length // 2
+                    if len1 <= half:
+                        raise ValueError()
+                    len2 = src_length - len1
+                    if len2 <= half and len1 > half:
+                        leftover = src_length - max_length
+                        end1 = sep_pos - leftover
+                        know_sent = know_sent[:end1] + know_sent[sep_pos:]
+                        pos = pos[:end1] + pos[sep_pos:]
+
+                        q1 = visible_matrix[:end1, :end1]
+                        q2 = visible_matrix[sep_pos:, sep_pos:]
+                        q3 = visible_matrix[:end1, sep_pos:]
+                        q4 = visible_matrix[sep_pos:, :end1]
+                        visible_matrix = np.hstack((np.vstack((q1, q4)), np.vstack((q3, q2))))
+                    else:
+                        m = np.math.ceil(max_length/2)
+                        n = np.math.floor(max_length/2)
+                        try:
+                            sep_pos2 = know_sent.index(config.SEP_TOKEN, sep_pos + 1)
+                        except ValueError as v1:
+                            know_sent = know_sent[:n] + know_sent[sep_pos: sep_pos + m]
+                            pos = pos[:n] + pos[sep_pos: sep_pos + m]
+
+                            q1 = visible_matrix[:n, :n]
+                            q2 = visible_matrix[sep_pos: sep_pos + m, sep_pos: sep_pos + m]
+                            q3 = visible_matrix[:n, sep_pos: sep_pos + m]
+                            q4 = visible_matrix[sep_pos: sep_pos + m, :n]
+                            visible_matrix = np.hstack((np.vstack((q1, q4)), np.vstack((q3, q2))))
+                        else:
+                            know_sent = know_sent[:n] + know_sent[sep_pos: sep_pos + m - 1] + know_sent[sep_pos2: sep_pos2 + 1]
+                            pos = pos[:n] + pos[sep_pos: sep_pos + m - 1] + pos[sep_pos2: sep_pos2 + 1]
+
+                            q1 = visible_matrix[:n, :n]
+                            q2 = visible_matrix[sep_pos: sep_pos + m - 1, sep_pos: sep_pos + m - 1]
+                            q3 = visible_matrix[:n, sep_pos: sep_pos + m - 1]
+                            q4 = visible_matrix[sep_pos: sep_pos + m - 1, :n]
+                            q5 = visible_matrix[sep_pos2: sep_pos2 + 1, :n]
+                            q6 = visible_matrix[sep_pos2: sep_pos2 + 1, sep_pos: sep_pos + m - 1]
+                            q7 = visible_matrix[:n, sep_pos2: sep_pos2 + 1]
+                            q8 = visible_matrix[sep_pos: sep_pos + m - 1, sep_pos2: sep_pos2 + 1]
+                            q9 = visible_matrix[sep_pos2: sep_pos2 + 1, sep_pos2: sep_pos2 + 1]
+                            # visible_matrix_sub = np.hstack((np.vstack((q1, q4, q5)), np.vstack((q3, q2, q6))))
+                            visible_matrix = np.hstack((np.hstack((np.vstack((q1, q4, q5)), np.vstack((q3, q2, q6)))), np.vstack((q7, q8, q9))))
+
+
+                except ValueError as v:
+                    if know_sent[-1] != config.SEP_TOKEN:
+                        know_sent = know_sent[:max_length]
+                        pos = pos[:max_length]
+                        visible_matrix = visible_matrix[:max_length, :max_length]
+                    else:
+                        know_sent = know_sent[:max_length - 1] + [know_sent[-1]]
+                        pos = pos[:max_length - 1] + [pos[-1]]
+                        q1 = visible_matrix[:max_length - 1, :max_length - 1]
+                        q2 = visible_matrix[-1:, :max_length - 1]
+                        q3 = visible_matrix[:max_length, -1:]
+                        visible_matrix = np.hstack((np.vstack((q1, q2)), q3))
+                    
             know_sent_batch.append(know_sent)
             position_batch.append(pos)
-            visible_matrix_batch.append(visible_matrix)
-            seg_batch.append(seg)
+            visible_matrix_batch.append(sym_matrix_to_vec(visible_matrix))
         
-        return know_sent_batch, position_batch, visible_matrix_batch, seg_batch
-
+        return know_sent_batch, position_batch, visible_matrix_batch

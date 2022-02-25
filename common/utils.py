@@ -1,14 +1,57 @@
-import sys
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-from common.processing.attention import SelfAttention
-from uer.utils.constants import *
-from multiprocessing import Process, Pool, cpu_count
+import os
+import csv
+import json
 import spacy
 import time
+import logging
+import torch
+from torch.nn import Softmax
+from uer.utils.constants import *
+from multiprocessing import Pool
+import numpy as np
+from brain.config import NEVER_SPLIT_TAG, DATASET_CACHE_LIMIT
+from scipy.stats import spearmanr, pearsonr
 
+def allowed_ner_labels(nlp):
+    all_labels = nlp.get_pipe('ner').labels
+    to_remove = ['CARDINAL', 'DATE', 'PERCENT', 'TIME', 'MONEY', 'LAW', 'QUANTITY', 'ORDINAL']
+    return set(all_labels) - set(to_remove)
 
+def distribute_sentences(sentences, named_entities, num_workers, cap=DATASET_CACHE_LIMIT):
+    grouped_sents = []
+    grouped_ents = []
+    for offset in range(num_workers):
+        indicies = [i + offset for i in range(0, len(sentences) - offset, num_workers)]
+        max_idx = indicies[-1]
+        grouped_indicies = []
+        curr_idxs = []
+        if max_idx >= cap:
+            mul = 1
+            for idx in indicies:
+                if idx >= mul * cap:
+                    mul += 1
+                    grouped_indicies.append(curr_idxs)
+                    curr_idxs = []
+                curr_idxs.append(idx)
+            if len(curr_idxs) > 0:
+                grouped_indicies.append(curr_idxs)
+        else:
+            grouped_indicies = [indicies]
+        
+        grouped_sents.append([[sentences[idx] for idx in idxs] for idxs in grouped_indicies])
+        grouped_ents.append([[named_entities[idx] for idx in idxs] for idxs in grouped_indicies])
+    return grouped_sents, grouped_ents, len(grouped_indicies)
+
+def get_sentence_embedding_files(sentences, embedding_path, cap=DATASET_CACHE_LIMIT, extension = 'json'):
+    folder_names = []
+    for i in range(0, len(sentences), cap):
+        line = " ".join(list(map(lambda x: x.replace('\n',''), sentences[i].split('\t')))[1:])
+        folder_name = hex(compute_hash(line))
+        fullpath = os.path.join(embedding_path, f'{folder_name}.{extension}')
+        if not os.path.exists(fullpath):
+            raise FileNotFoundError(f'sentence embedding path not found for line: {line}')
+        folder_names.append(fullpath)
+    return folder_names
 
 # Datset loader.
 def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
@@ -32,22 +75,22 @@ def batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms):
 
 def add_knowledge_worker(params):
 
-    p_id, sentences, named_entities, columns, kg, vocab, args = params
+    p_id, sentences, named_entities, columns, kg, vocab, args, e = params
     
     sentences_num = len(sentences)
-    progress_step = int(sentences_num * 0.1)
+    progress_step = int(sentences_num * 0.25)
     dataset = []
     for line_id, (line, entities) in enumerate(zip(sentences, named_entities)):
-        if line_id % progress_step == 0:
-            print("Progress of process {}: {}/{}".format(p_id, line_id, sentences_num))
-            sys.stdout.flush()
+        # if line_id % progress_step == 0:
+        #     logging.info(f"Progress of process {p_id}: {line_id}/{sentences_num}")
+        #     sys.stdout.flush()
         line = line.strip().split('\t')
         try:
             if len(line) == 2:
                 label = int(line[columns["label"]])
                 text = CLS_TOKEN + line[columns["text_a"]]
    
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
+                tokens, pos, vm = kg.add_knowledge_with_vm([text], entities, seq=args.sequence, max_seq_len=args.max_seq_len, max_length=args.seq_length, threshold=args.threshold, e=e)
                 tokens = tokens[0]
                 pos = pos[0]
                 vm = vm[0]
@@ -60,11 +103,9 @@ def add_knowledge_worker(params):
             elif len(line) == 3:
                 # for sts normalize to between 0 and 1 by dividing by 5
                 label = float(line[columns["label"]])/5.0 if args.labels_num == 1 else int(line[columns["label"]])
-                # text = CLS_TOKEN + line[columns["text_a"]] + SEP_TOKEN + line[columns["text_b"]] + SEP_TOKEN
                 text = [line[columns["text_a"]], line[columns["text_b"]]]
-                # print(text)
 
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
+                tokens, pos, vm = kg.add_knowledge_with_vm([text], entities, seq=args.sequence, max_seq_len=args.max_seq_len, max_length=args.seq_length, threshold=args.threshold, e=e)
                 tokens = tokens[0]
                 pos = pos[0]
                 vm = vm[0]
@@ -82,44 +123,17 @@ def add_knowledge_worker(params):
                         seg_tag += 1
 
                 dataset.append((token_ids, label, mask, pos, vm))
-            
-            elif len(line) == 4:  # for dbqa
-                qid=int(line[columns["qid"]])
-                label = int(line[columns["label"]])
-                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
-                text = CLS_TOKEN + text_a + SEP_TOKEN + text_b + SEP_TOKEN
-
-                tokens, pos, vm, _ = kg.add_knowledge_with_vm([text], entities, add_pad=True, max_length=args.seq_length)
-                tokens = tokens[0]
-                pos = pos[0]
-                vm = vm[0]
-
-                token_ids = [vocab.get(t) for t in tokens]
-                mask = []
-                seg_tag = 1
-                for t in tokens:
-                    if t == PAD_TOKEN:
-                        mask.append(0)
-                    else:
-                        mask.append(seg_tag)
-                    if t == SEP_TOKEN:
-                        seg_tag += 1
-                
-                dataset.append((token_ids, label, mask, pos, vm, qid))
             else:
                 pass
             
         except Exception as e:
-            print("Error line: ", line, e)
+            logging.error(f"Error line: {line} {e}")
             raise ValueError
     return dataset
 
-
 def read_dataset(path, columns, kg, vocab, args, workers_num=1):
 
-        
-
-        print("Loading sentences from {}".format(path))
+        logging.info(f"Loading sentences from {path}")
         sentences = []
         with open(path, mode='r', encoding="utf-8") as f:
             for line_id, line in enumerate(f):
@@ -133,53 +147,48 @@ def read_dataset(path, columns, kg, vocab, args, workers_num=1):
         named_entities = get_entities(sentences, args)
         # print_named_entity_stats(named_entities)
         end_time = time.perf_counter()
+        logging.info(f'Time taken for processing entities: {end_time - start_time:.2f}s')
 
-        print('time for processing entities:', end_time - start_time)
+        use_cache = args.entity_recognition != "none" and not args.compute_embeddings
+        if use_cache:
+            embedding_paths = get_sentence_embedding_files(sentences, args.sentence_embedding_path, args.dataset_cache_limit)
+        sents, ents, no_pools = distribute_sentences(sentences, named_entities, workers_num, args.dataset_cache_limit)
 
-        print("There are {} sentence in total. We use {} processes to inject knowledge into sentences.".format(sentence_num, workers_num))
+        logging.info(f"There are {sentence_num} sentence in total. We use {workers_num} processes to inject knowledge into sentences.")
+        dataset = []
         if workers_num > 1:
-            params = []
-            sentence_per_block = int(sentence_num / workers_num) + 1
-            for i in range(workers_num):
-                params.append((i, sentences[i*sentence_per_block: (i+1)*sentence_per_block], 
-                named_entities[i*sentence_per_block: (i+1)*sentence_per_block], columns, kg, vocab, args))
-            pool = Pool(workers_num)
-            res = pool.map(add_knowledge_worker, params)
-            pool.close()
-            pool.join()
-            dataset = [sample for block in res for sample in block]
+            for p in range(no_pools):
+                e = None if not use_cache else load_cache(embedding_paths[p])
+                params = []
+                for i in range(workers_num):
+                    params.append((i, sents[i][p], ents[i][p], columns, kg, vocab, args, e))
+                pool = Pool(workers_num)
+                res = pool.map(add_knowledge_worker, params)
+                pool.close()
+                pool.join()
+                dataset.extend([sample for block in res for sample in block])
         else:
-            params = (0, sentences, named_entities, columns, kg, vocab, args)
-            dataset = add_knowledge_worker(params)
+            for p in range(no_pools):
+                e = None if not use_cache else load_cache(embedding_paths[p])
+                params = (0, sents[0][p], ents[0][p], columns, kg, vocab, args, e)
+                dataset.extend(add_knowledge_worker(params))
 
         return dataset
 
 def get_entities(sentences, args):
 
-    entity_recognition = args.entity_recognition
-    if entity_recognition == "spacy":
+    if args.entity_recognition == "spacy":
         # Spacy setup
         nlp = spacy.load("en_core_web_sm", exclude=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"])
         
         sentences = list(map(lambda x: x[x.index("\t"):], sentences))
         processed = nlp.pipe(sentences)
 
-        named_entities = list(map(lambda x: [a.text for a in x.ents], list(processed)))
-        # named_entities = list(filter(lambda x: not x.isdigit(), named_entities))
+        named_entities = list(map(lambda x: [a.text for a in x.ents if a.label_ in allowed_ner_labels(nlp)], list(processed)))
 
-    elif entity_recognition == "attention":
-        dataloader = DataLoader(sentences, batch_size=128)
-
-        attention = SelfAttention()
-        named_entities = []
-        for sentence_batch in dataloader:
-            named_entities.extend(attention.get_entities_via_attention(sentence_batch))
-
-        n = args.attention_n
-        named_entities = list(map(lambda x: list(set(x)), named_entities))
-        named_entities = list(map(lambda x: x[:min(len(x), n)], named_entities))
     else:
         named_entities = list(map(lambda x: [], sentences))
+
 
     named_entities = [list(filter(lambda x: not x.isdigit(), group)) for group in named_entities]
 
@@ -187,13 +196,13 @@ def get_entities(sentences, args):
 
 def print_named_entity_stats(named_entities):
     lens = list(map(lambda x: len(x), named_entities))
-    print('entity stats:')
-    print(f'max len: {max(lens)}')        
-    print(f'min len: {min(lens)}')        
-    print(f'average len: {sum(lens)/len(lens)}')        
+    logging.info('entity stats:')
+    logging.info(f'max len: {max(lens)}')        
+    logging.info(f'min len: {min(lens)}')        
+    logging.info(f'average len: {sum(lens)/len(lens)}')        
 
 # Evaluation function.
-def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
+def evaluate(model, device, args, is_test, columns, kg, vocab):
     if is_test:
         dataset = read_dataset(args.test_path, columns, kg, vocab, args, workers_num=args.workers_num)
     else:
@@ -207,12 +216,12 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
         label_ids = torch.LongTensor([sample[1] for sample in dataset])
     mask_ids = torch.LongTensor([sample[2] for sample in dataset])
     pos_ids = torch.LongTensor([example[3] for example in dataset])
-    vms = [example[4] for example in dataset]
+    vms = np.array([example[4] for example in dataset], dtype=np.uint8)
 
     batch_size = args.batch_size
     instances_num = input_ids.size()[0]
     if is_test:
-        print("The number of evaluation instances: ", instances_num)
+        logging.info(f"The number of evaluation instances: {instances_num}")
 
     correct = 0
     # Confusion matrix.
@@ -221,36 +230,12 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
     model.eval()
     
     if args.labels_num == 1:
-        total_mse_loss= 0
+        total_loss= 0
+        all_labels = []
+        all_logits = []
         for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
-            # vms_batch = vms_batch.long()
-            vms_batch = torch.LongTensor(vms_batch)
-
-            input_ids_batch = input_ids_batch.to(device)
-            label_ids_batch = label_ids_batch.to(device)
-            mask_ids_batch = mask_ids_batch.to(device)
-            pos_ids_batch = pos_ids_batch.to(device)
-            vms_batch = vms_batch.to(device)
-
-            with torch.no_grad():
-                try:
-                    loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
-                except:
-                    print(input_ids_batch)
-                    print(input_ids_batch.size())
-                    print(vms_batch)
-                    print(vms_batch.size())
-
-            total_mse_loss += loss.item()
-            # print(f'Loss for batch {i} is {loss.item()}')
-        print(f"Total MSE Loss = {total_mse_loss:.3f}, batches = {i + 1}, Avg loss = {total_mse_loss/(i+1):.3f}")
-        return (i + 1) / total_mse_loss if total_mse_loss > 0 else float('inf')
-
-    elif args.mean_reciprocal_rank:
-        for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
-
-            vms_batch = torch.LongTensor(vms_batch)
+            vms_batch = torch.LongTensor(np.array([vec_to_sym_matrix(vec, args.seq_length) for vec in vms_batch], dtype=np.uint8))
 
             input_ids_batch = input_ids_batch.to(device)
             label_ids_batch = label_ids_batch.to(device)
@@ -260,93 +245,24 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
 
             with torch.no_grad():
                 loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
-            logits = nn.Softmax(dim=1)(logits)
-            if i == 0:
-                logits_all=logits
-            if i >= 1:
-                logits_all=torch.cat((logits_all,logits),0)
-    
-        order = -1
-        gold = []
-        for i in range(len(dataset)):
-            qid = dataset[i][-1]
-            label = dataset[i][1]
-            if qid == order:
-                j += 1
-                if label == 1:
-                    gold.append((qid,j))
-            else:
-                order = qid
-                j = 0
-                if label == 1:
-                    gold.append((qid,j))
 
-        label_order = []
-        order = -1
-        for i in range(len(gold)):
-            if gold[i][0] == order:
-                templist.append(gold[i][1])
-            elif gold[i][0] != order:
-                order=gold[i][0]
-                if i > 0:
-                    label_order.append(templist)
-                templist = []
-                templist.append(gold[i][1])
-        label_order.append(templist)
 
-        order = -1
-        score_list = []
-        for i in range(len(logits_all)):
-            score = float(logits_all[i][1])
-            qid=int(dataset[i][-1])
-            if qid == order:
-                templist.append(score)
-            else:
-                order = qid
-                if i > 0:
-                    score_list.append(templist)
-                templist = []
-                templist.append(score)
-        score_list.append(templist)
+            total_loss += loss.item()
+            all_labels.extend(label_ids_batch.flatten().tolist())
+            all_logits.extend(logits.flatten().tolist())
 
-        rank = []
-        pred = []
-        print(len(score_list))
-        print(len(label_order))
-        for i in range(len(score_list)):
-            if len(label_order[i])==1:
-                if label_order[i][0] < len(score_list[i]):
-                    true_score = score_list[i][label_order[i][0]]
-                    score_list[i].sort(reverse=True)
-                    for j in range(len(score_list[i])):
-                        if score_list[i][j] == true_score:
-                            rank.append(1 / (j + 1))
-                else:
-                    rank.append(0)
+        spearman = spearmanr(all_labels, all_logits)
+        pearsonc, pearsonp = pearsonr(all_labels, all_logits)
+        logging.info(f"Total Loss = {total_loss:.3f}, batches = {i + 1}, Avg loss = {total_loss/(i+1):.3f}")
+        logging.info(f"Spearman correlation = ({spearman.correlation:.5f}, {spearman.pvalue:.2f}), Pearson correlation = ({pearsonc:.5f}, {pearsonp:.2f})")
 
-            else:
-                true_rank = len(score_list[i])
-                for k in range(len(label_order[i])):
-                    if label_order[i][k] < len(score_list[i]):
-                        true_score = score_list[i][label_order[i][k]]
-                        temp = sorted(score_list[i],reverse=True)
-                        for j in range(len(temp)):
-                            if temp[j] == true_score:
-                                if j < true_rank:
-                                    true_rank = j
-                if true_rank < len(score_list[i]):
-                    rank.append(1 / (true_rank + 1))
-                else:
-                    rank.append(0)
-        MRR = sum(rank) / len(rank)
-        print("MRR", MRR)
-        return MRR
+        return (i+1) / total_loss if total_loss > 0 else float('inf')
+
 
     else:
         for i, (input_ids_batch, label_ids_batch,  mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
 
-            # vms_batch = vms_batch.long()
-            vms_batch = torch.LongTensor(vms_batch)
+            vms_batch = torch.LongTensor(np.array([vec_to_sym_matrix(vec, args.seq_length) for vec in vms_batch], dtype=np.uint8))
 
             input_ids_batch = input_ids_batch.to(device)
             label_ids_batch = label_ids_batch.to(device)
@@ -355,15 +271,9 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
             vms_batch = vms_batch.to(device)
 
             with torch.no_grad():
-                try:
-                    loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
-                except:
-                    print(input_ids_batch)
-                    print(input_ids_batch.size())
-                    print(vms_batch)
-                    print(vms_batch.size())
+                loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
 
-            logits = nn.Softmax(dim=1)(logits)
+            logits = Softmax(dim=1)(logits)
             pred = torch.argmax(logits, dim=1)
             gold = label_ids_batch
             for j in range(pred.size()[0]):
@@ -371,22 +281,17 @@ def evaluate(model, device, args, is_test, columns, kg, vocab, metrics='Acc'):
             correct += torch.sum(pred == gold).item()
     
         if is_test:
-            print("Confusion matrix:")
-            print(confusion)
-            print("Report precision, recall, and f1:")
+            logging.info("Confusion matrix:")
+            logging.info(confusion)
+            logging.info("Report precision, recall, and f1:")
         
         for i in range(confusion.size()[0]):
             p = confusion[i,i].item()/confusion[i,:].sum().item()
             r = confusion[i,i].item()/confusion[:,i].sum().item()
             f1 = 2*p*r / (p+r)
-            if i == 1:
-                label_1_f1 = f1
-            print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i,p,r,f1))
-        print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct/len(dataset), correct, len(dataset)))
-        if metrics == 'f1':
-            return label_1_f1
-        else:
-            return correct/len(dataset)
+            logging.info(f"Label {i}: {p:.3f}, {r:.3f}, {f1:.3f}")
+        logging.info(f"Acc. (Correct/Total): {correct/instances_num:.4f} ({correct}/{instances_num})")
+        return correct/instances_num
 
 
 # import csv
@@ -396,3 +301,165 @@ def convert_ids_to_string(ids, tokenizer, filename="input_ids_string.csv"):
         tokens = tokenizer.convert_ids_to_tokens(ids)
         token_strings = tokenizer.convert_tokens_to_string(tokens)
         fd.write(token_strings + "\n")
+
+
+def convert_ids_to_text(ids, tokenizer):
+    tokens = tokenizer.convert_ids_to_tokens(ids)
+    token_strings = tokenizer.convert_tokens_to_string(tokens)
+    return token_strings
+
+def write_input_batch_to_file(input_batch, tokenizer, filename):
+    with open(filename, 'a', encoding='UTF-8') as fd:
+        for ids in input_batch:
+            str_out = convert_ids_to_text(ids, tokenizer)
+            fd.write(str_out + "\n")
+
+def write_loss_to_file(loss, filename):
+    with open(filename, 'a') as ff:
+        ff.write("=============\n" + str(loss) + "\n")
+
+def write_output_to_csv(input_batch, tokenizer, logits, label_ids, filename):
+    """
+    write output to csv for manual inspection of predicted vs actual per sent
+    """
+
+    # batched = torch.dstack((input_batch, label_ids, logits))
+    with open(filename, 'w', newline='', encoding='UTF-8') as wr:
+        writer = csv.DictWriter(wr, fieldnames=['sent', 'label', 'predicted'], quoting=csv.QUOTE_NONE, dialect=csv.excel_tab, escapechar='/')
+        writer.writeheader()
+        for ids, label, pred in zip(input_batch, label_ids, logits):
+            sentence = convert_ids_to_text(ids, tokenizer)
+            writer.writerow({'sent': sentence, 'label': round(label.item(),3), 'predicted':round(pred.item(),3)})
+
+def write_cls_outcome(filename, tokenizer, input_ids_batch, idxs, predictions, true_labels):
+    with open(filename, 'a', encoding='UTF-8') as fd:
+        for ids, idx, pred, gold in zip(input_ids_batch, idxs, predictions, true_labels):
+            str_out = convert_ids_to_text(ids, tokenizer).replace('[PAD]', '').strip()
+            fd.write(f"{idx}\t{gold}\t{pred}\t{str_out}\n")
+
+def sym_matrix_to_vec(mat):
+    dim = mat.shape[0]
+    iu = np.mask_indices(dim, np.tril)
+    vec = mat[iu]
+    return vec
+
+def vec_to_sym_matrix(vec, dim):
+    indicies = np.tril_indices(dim)
+    mat = np.zeros((dim, dim), dtype=vec.dtype)
+    mat[indicies] = vec
+    mat = np.tril(mat) + np.tril(mat, -1).T
+    return mat
+    
+
+def set_tf_logging_level():
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
+def setup_logging(filename):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+
+    for hlr in logger.handlers:
+        logger.removeHandler(hlr)
+        
+    dirname = os.path.dirname(filename)
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+
+    file = logging.FileHandler(filename,mode='a', encoding='utf-8')
+    format = logging.Formatter("%(message)s")
+    file.setLevel(logging.INFO)
+    file.setFormatter(format)
+
+    stream = logging.StreamHandler()
+    stream.setLevel(logging.DEBUG)
+    stream.setFormatter(format)
+
+    logger.addHandler(file)
+    logger.addHandler(stream)
+
+def log_args(args):
+
+    logging.info(f"pretrained_model_path: {args.pretrained_model_path}")
+    logging.info(f"config_path: {args.config_path}")
+    logging.info(f"vocab_path: {args.vocab_path}")
+    logging.info(f"output_model_path: {args.output_model_path}")
+    logging.info(f"train_path: {args.train_path}")
+    logging.info(f"dev_path: {args.dev_path}")
+    logging.info(f"test_path: {args.test_path}")
+    logging.info(f"sentence_embedding_path: {args.sentence_embedding_path}")
+    logging.info(f"cache_path: {args.cache_path}")
+    logging.info(f"cache_embedding_path: {args.cache_embedding_path}")
+    logging.info(f"sqlconnectionurl: {args.sqlconnectionurl}, sequence: {args.sequence}, max_seq_len: {args.max_seq_len}")
+    logging.info(f"pooling: {args.pooling}, cpu: {args.cpu}, no_vm: {args.no_vm}, labels_num: {args.labels_num}")
+    logging.info(f"dropout: {args.dropout}, entity_recognition: {args.entity_recognition}, threshold: {args.threshold}, learning rate: {args.learning_rate}")
+    logging.info(f"batch_size: {args.batch_size}, seq_length: {args.seq_length}, epochs_num: {args.epochs_num}, seed: {args.seed}")
+
+def sort_by_len(ls):
+    return sorted(ls, key=len, reverse=True)
+
+def group_related_tokens(sent, tokenized_sent, named_entities):
+    """
+    sent: ["abcd", "abcd_pair"] i.e. sentence and it's pair
+    returns:
+    list of related tokens grouped, 
+    indices of which group is an entity match,
+    named entity corresponding to said index
+    """
+    entities = sort_by_len(named_entities)
+    groups = []
+    idx = -1
+    tokens = tokenized_sent.tokens()
+    entity_match_index = []
+    matches = []
+    while idx < len(tokens) - 1:
+        idx += 1
+        token = tokens[idx]
+        group = [token]
+        if token in NEVER_SPLIT_TAG:
+            groups.append(group)
+            continue
+        char_span = tokenized_sent.token_to_chars(idx)
+        sequence = tokenized_sent.token_to_sequence(idx)
+        for entity in entities:
+            lower_ent = entity.strip().lower().replace("_", " ")
+            end_pos = char_span.start + len(lower_ent)
+            if len(sent[sequence]) < end_pos:
+                continue
+
+            substr = sent[sequence][char_span.start: end_pos]
+            if substr.lower() == lower_ent:
+                token_end = tokenized_sent.char_to_token(end_pos - 1, sequence_index=sequence)
+                group = [t for t in tokenized_sent.tokens()[idx: token_end + 1]]
+                idx = token_end
+                entity_match_index.append(len(groups))
+                matches.append(entity)
+                break # we only care about the longest entity match
+        groups.append(group)
+    return groups, entity_match_index, matches
+
+
+def load_cache(path):
+    with open(path, encoding='utf-8') as fd:
+        return json.loads(fd.readline())
+
+
+def fnv1a_64(string, seed=0):
+    """
+    Returns: The FNV-1a (alternate) hash of a given string
+    """
+    #Constants
+    FNV_prime = 1099511628211
+    offset_basis = 14695981039346656037
+
+    #FNV-1a Hash Function
+    hash = offset_basis + seed
+    for char in string:
+        hash = hash ^ ord(char)
+        hash = hash * FNV_prime
+    return hash
+
+def compute_hash(x, nbits=16):
+    hash = fnv1a_64(x)
+    hash_str = str(hash)
+    hash_short = int(hash_str[:nbits] + hash_str[-nbits:])
+    return hash_short

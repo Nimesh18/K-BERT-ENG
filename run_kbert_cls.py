@@ -3,12 +3,15 @@
   This script provides an k-BERT exmaple for classification.
 """
 import sys
+import time
 import torch
-import json
 import random
+import logging
 import argparse
-import collections
+import numpy as np
 import torch.nn as nn
+from brain import KnowledgeGraph
+from common.utils import *
 from uer.utils.vocab import Vocab
 from uer.utils.constants import *
 from uer.utils.tokenizer import * 
@@ -17,11 +20,6 @@ from uer.utils.optimizers import  BertAdam
 from uer.utils.config import load_hyperparam
 from uer.utils.seed import set_seed
 from uer.model_saver import save_model
-from brain import KnowledgeGraph
-from multiprocessing import Process, Pool
-import numpy as np
-import time
-from common.utils import *
 
 class BertClassifier(nn.Module):
     def __init__(self, args, model):
@@ -35,7 +33,7 @@ class BertClassifier(nn.Module):
         self.softmax = nn.LogSoftmax(dim=-1)
         self.criterion = nn.NLLLoss()
         self.use_vm = False if args.no_vm else True
-        print("[BertClassifier] use visible_matrix: {}".format(self.use_vm))
+        logging.info(f"[BertClassifier] use visible_matrix: {self.use_vm}")
 
     def forward(self, src, label, mask, pos=None, vm=None):
         """
@@ -83,6 +81,14 @@ def main():
                         help="Path of the testset.")
     parser.add_argument("--config_path", default="./models/google_config.json", type=str,
                         help="Path of the config file.")
+    parser.add_argument("--cache_path", default="./cache/ag_news/cache.json", type=str,
+                        help="Path of KG cache file.")
+    parser.add_argument("--cache_embedding_path", default="./cache/ag_news/cache_embeddings.json", type=str,
+                        help="Path of embedding cache file.")
+    parser.add_argument("--sentence_embedding_path", default="./cache/ag_news/sample/", type=str,
+                        help="Path of dataset embedding file.")
+    parser.add_argument("--logging_path", default="./outputs/logging/", type=str,
+                        help="Path of logging file output.")
 
     # Model options.
     parser.add_argument("--batch_size", type=int, default=32,
@@ -126,16 +132,12 @@ def main():
                         help="Dropout.")
     parser.add_argument("--epochs_num", type=int, default=5,
                         help="Number of epochs.")
-    parser.add_argument("--report_steps", type=int, default=100,
+    parser.add_argument("--report_steps", type=int, default=1000,
                         help="Specific steps to print prompt.")
-    parser.add_argument("--seed", type=int, default=7,
+    parser.add_argument("--seed", type=int, default=8,
                         help="Random seed.")
 
-    # Evaluation options.
-    parser.add_argument("--mean_reciprocal_rank", action="store_true", help="Evaluation metrics for DBQA dataset.")
-
     # kg
-    parser.add_argument("--kg_name", required=True, help="KG name or path")
     parser.add_argument("--workers_num", type=int, default=1, help="number of process for loading dataset")
     parser.add_argument("--no_vm", action="store_true", help="Disable the visible_matrix")
 
@@ -143,33 +145,50 @@ def main():
     parser.add_argument("--cpu", action="store_true", required=False, help="Strictly use CPU or not", default=False)
 
     # Connection URL for SQL DB
-    parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default="postgresql+psycopg2://@/postgres")
+    parser.add_argument("--sqlconnectionurl", required=False, help="Connection URL for PostgreSQL database", default=None)
 
 
-    parser.add_argument("--entity_recognition", choices=["spacy", "attention", "none"], default="spacy",
+    parser.add_argument("--entity_recognition", choices=["spacy", "none"], default="spacy",
                         help="Specify entity extraction method" 
                              "Spacy NER"
-                             "Identify important words through self-attention"
-                             "Inject knowledge for every token in sentence"
+                             "Do not inject knowledge"
                              )
-    
-    parser.add_argument("--attention_n", required=False, type=int, help="Entity recognition param for attention - Get top n words", default=3)
+
+    parser.add_argument("--threshold", required=False, type=float, help="Embedding similarity threshold for term insertion", default=0)
+
+    parser.add_argument("--compute_embeddings", action="store_true", required=False, help="Compute new embeddings or use pre-computed", default=False)
+
+    parser.add_argument("--dataset_cache_limit", type=int, default=1000, help="Split size of dataset cache embedding files")
+
+    parser.add_argument("--sequence", type=int, help="Sequence to inject knowledge into", default=None)
+
+    parser.add_argument("--max_seq_len", type=int, help="Maximum Sequence length where knowledge can be injected into", default=None)
 
     args = parser.parse_args()
 
     # Load the hyperparameters from the config file.
     args = load_hyperparam(args)
 
+    if args.sqlconnectionurl is not None:
+        args.compute_embeddings = True
+
+    if args.compute_embeddings and args.workers_num > 1:
+        print(f'Computation of embeddings must be done sequentially... setting workers_num to 1')
+        args.workers_num = 1
+
     # run experiment
     start_time = time.perf_counter()
     run(args)
     end_time = time.perf_counter()
-    print(f"Time taken: {end_time - start_time:.2f} seconds")
-
+    logging.info(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def run(args):
 
     set_seed(args.seed)
+    set_tf_logging_level()
+
+    logging_filename = f'{args.logging_path}kbert-cls-{time.strftime("%Y-%m-%d %H.%M.%S", time.localtime())}.log'
+    setup_logging(logging_filename)
 
     # Count the number of labels.
     labels_set = set()
@@ -187,6 +206,8 @@ def run(args):
             except:
                 pass
     args.labels_num = len(labels_set) 
+
+    log_args(args)
 
     # Load vocabulary.
     vocab = Vocab()
@@ -213,43 +234,40 @@ def run(args):
 
     # For simplicity, we use DataParallel wrapper to use multiple GPUs.
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
-    print("Using device: ", device)
+    logging.info(f"Using device: {device}")
     if torch.cuda.device_count() > 1:
-        print("{} GPUs are available. Let's use them.".format(torch.cuda.device_count()))
+        logging.info(f"{torch.cuda.device_count()} GPUs are available. Let's use them.")
         model = nn.DataParallel(model)
 
     model = model.to(device)
     
     # Build knowledge graph.
-    if args.kg_name == 'none':
-        spo_files = []
-    else:
-        spo_files = [args.kg_name]
-    kg = KnowledgeGraph(spo_files=spo_files, connurl=args.sqlconnectionurl, predicate=True)
+    kg = KnowledgeGraph(connurl=args.sqlconnectionurl, cache_path=args.cache_path,
+     cache_embedding_path=args.cache_embedding_path, compute_embeddings=args.compute_embeddings)
 
     # Training phase.
-    print("Start training.")
+    logging.info("Start training.")
     ss = time.perf_counter()
     trainset = read_dataset(args.train_path, columns, kg, vocab, args, workers_num=args.workers_num)
     ee = time.perf_counter()
-    print(f'Time taken to read training set: {ee-ss}s')
+    logging.info(f'Time taken to read training set: {ee-ss:.2f}s')
     
-    print("Shuffling dataset")
+    logging.info("Shuffling dataset")
     random.shuffle(trainset)
     instances_num = len(trainset)
     batch_size = args.batch_size
 
-    print("Trans data to tensor.")
+    # logging.info("Trans data to tensor.")
     input_ids = torch.LongTensor([example[0] for example in trainset])
     label_ids = torch.LongTensor([example[1] for example in trainset])
     mask_ids = torch.LongTensor([example[2] for example in trainset])
     pos_ids = torch.LongTensor([example[3] for example in trainset])
-    vms = [example[4] for example in trainset]
+    vms = np.array([example[4] for example in trainset], dtype=np.uint8)
 
     train_steps = int(instances_num * args.epochs_num / batch_size) + 1
 
-    print("Batch size: ", batch_size)
-    print("The number of training instances:", instances_num)
+    # logging.info(f"Batch size: {batch_size}")
+    logging.info(f"The number of training instances: {instances_num}")
 
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'gamma', 'beta']
@@ -262,14 +280,16 @@ def run(args):
     total_loss = 0.
     result = 0.0
     best_result = 0.0
-    print('Begin training loop')
+    
+    logging.info('Begin training loop')
     for epoch in range(1, args.epochs_num+1):
         train_loop_start = time.perf_counter()
+
         model.train()
         for i, (input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch) in enumerate(batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vms)):
             model.zero_grad()
 
-            vms_batch = torch.LongTensor(vms_batch)
+            vms_batch = torch.LongTensor(np.array([vec_to_sym_matrix(vec, args.seq_length) for vec in vms_batch], dtype=np.uint8))
 
             input_ids_batch = input_ids_batch.to(device)
             label_ids_batch = label_ids_batch.to(device)
@@ -282,36 +302,39 @@ def run(args):
                 loss = torch.mean(loss)
             total_loss += loss.item()
             if (i + 1) % args.report_steps == 0:
-                print("Epoch id: {}, Training steps: {}, Avg loss: {:.3f}".format(epoch, i+1, total_loss / args.report_steps))
+                logging.info(f"Epoch id: {epoch}, Training steps: {i+1}, Avg loss: {total_loss / args.report_steps:.3f}")
                 sys.stdout.flush()
                 total_loss = 0.
             loss.backward()
             optimizer.step()
 
         train_loop_end = time.perf_counter()
-        print(f'Time taken for epoch {epoch} in training loop: {train_loop_end - train_loop_start}')
-        print("Start evaluation on dev dataset.")
+        logging.info(f'Time taken for epoch {epoch} in training loop: {train_loop_end - train_loop_start:.2f}s')
+        logging.info("Start evaluation on dev dataset.")
         eval_start = time.perf_counter()
 
         result = evaluate(model, device, args, False, columns, kg, vocab)
         if result > best_result:
             best_result = result
-            save_model(model, args.output_model_path)
-        else:
-            continue
+            save_model(model.cpu(), args.output_model_path)
+            model = model.to(device)
+        # else:
+        #     continue
 
         eval_end = time.perf_counter()
-        print(f'Evaluation on dev dataset time taken: {eval_end - eval_start}')
+        logging.info(f'Evaluation on dev dataset time taken: {eval_end - eval_start:.2f}s')
 
-        print("Start evaluation on test dataset.")
+        logging.info("Start evaluation on test dataset.")
 
         test_start = time.perf_counter()
         evaluate(model, device, args, True, columns, kg, vocab)
         test_end = time.perf_counter()
-        print(f'Evaluation on test dataset time taken: {test_end - test_start}')
+        logging.info(f'Evaluation on test dataset time taken: {test_end - test_start:.2f}s')
 
+    if args.epochs_num == 1:
+        return
     # Evaluation phase.
-    print("Final evaluation on the test dataset.")
+    logging.info("Final evaluation on the test dataset.")
 
     if torch.cuda.device_count() > 1:
         model.module.load_state_dict(torch.load(args.output_model_path))

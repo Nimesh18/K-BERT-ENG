@@ -7,9 +7,9 @@ from sentence_transformers import util
 ROBERTA_PATH = 'sentence-transformers/nli-distilroberta-base-v2'
 
 class RoBERTa(object):
-    def __init__(self):
+    def __init__(self, cpu=False):
         self.model = RobertaModel.from_pretrained(ROBERTA_PATH, output_hidden_states=True)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() and not cpu else "cpu")
         self.model = self.model.to(device)
         self.tokenizer = RobertaTokenizerFast.from_pretrained(ROBERTA_PATH)
 
@@ -123,7 +123,13 @@ class RoBERTa(object):
         """
         get the top n similar sentence embeddings to word_embedding
         """
-        similarities = [util.pytorch_cos_sim(word_embedding, sentence_embedding) for sentence_embedding in sentence_embeddings]
+        similarities = torch.tensor([util.pytorch_cos_sim(word_embedding, sentence_embedding) for sentence_embedding in sentence_embeddings])
+        idxs = torch.argsort(similarities, descending=True)
+        return idxs[:n].squeeze(), similarities[idxs[:n]].squeeze()
+
+    @staticmethod
+    def get_weighted_most_similar(word_embedding, sentence_embeddings, weights, n=1):
+        similarities = [util.pytorch_cos_sim(word_embedding, sentence_embedding) * weight for sentence_embedding, weight in zip(sentence_embeddings, weights)]
         max_idx = 0
         maximum = 0
         for idx, similarity in enumerate(similarities):
@@ -132,3 +138,13 @@ class RoBERTa(object):
                 max_idx = idx
 
         return max_idx, maximum
+
+    @staticmethod
+    def meet_threshold(word_embedding, sentence_embeddings, threshold=0.5):
+        similarities = [util.pytorch_cos_sim(word_embedding, sentence_embedding) for sentence_embedding in sentence_embeddings]
+        idxs=[]
+        for idx, similarity in enumerate(similarities):
+            if similarity > threshold:
+                idxs.append(idx)
+
+        return idxs

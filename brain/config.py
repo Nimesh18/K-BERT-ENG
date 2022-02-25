@@ -1,18 +1,5 @@
-import os
-
-
-FILE_DIR_PATH = os.path.dirname(os.path.abspath(__file__))
-
-KGS = {
-    'HowNet': os.path.join(FILE_DIR_PATH, 'kgs/HowNet.spo'),
-    'CnDbpedia': os.path.join(FILE_DIR_PATH, 'kgs/CnDbpedia.spo'),
-    'Medical': os.path.join(FILE_DIR_PATH, 'kgs/Medical.spo'),
-}
-
-YAGO = 'YAGO'
-CONCEPTNET = 'ConceptNet'
-ENGLISH_KGS = [YAGO, CONCEPTNET] # later add ConceptNet
 MAX_ENTITIES = 2
+DATASET_CACHE_LIMIT = 6000
 
 # Special token words.
 PAD_TOKEN = '[PAD]'
