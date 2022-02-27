@@ -1,5 +1,5 @@
 torch>=1.0
 argparse==1.1
-tables
-word_freq
-marisa_trie
+transformers
+sentence_transformers
+spacy==3.0.0
