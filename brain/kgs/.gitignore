@@ -1,2 +1,4 @@
 CnDbpedia.spo
 *.spo
+*.json
+*.tsv

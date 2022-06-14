@@ -145,7 +145,6 @@ def read_dataset(path, columns, kg, vocab, args, workers_num=1):
 
         start_time = time.perf_counter()
         named_entities = get_entities(sentences, args)
-        # print_named_entity_stats(named_entities)
         end_time = time.perf_counter()
         logging.info(f'Time taken for processing entities: {end_time - start_time:.2f}s')
 
@@ -246,7 +245,8 @@ def evaluate(model, device, args, is_test, columns, kg, vocab):
             with torch.no_grad():
                 loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vms_batch)
 
-
+            if torch.cuda.device_count() > 1:
+                loss = torch.mean(loss)
             total_loss += loss.item()
             all_labels.extend(label_ids_batch.flatten().tolist())
             all_logits.extend(logits.flatten().tolist())
@@ -279,7 +279,7 @@ def evaluate(model, device, args, is_test, columns, kg, vocab):
             for j in range(pred.size()[0]):
                 confusion[pred[j], gold[j]] += 1
             correct += torch.sum(pred == gold).item()
-    
+
         if is_test:
             logging.info("Confusion matrix:")
             logging.info(confusion)
@@ -349,7 +349,6 @@ def vec_to_sym_matrix(vec, dim):
     mat[indicies] = vec
     mat = np.tril(mat) + np.tril(mat, -1).T
     return mat
-    
 
 def set_tf_logging_level():
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
@@ -390,7 +389,7 @@ def log_args(args):
     logging.info(f"cache_path: {args.cache_path}")
     logging.info(f"cache_embedding_path: {args.cache_embedding_path}")
     logging.info(f"sqlconnectionurl: {args.sqlconnectionurl}, sequence: {args.sequence}, max_seq_len: {args.max_seq_len}")
-    logging.info(f"pooling: {args.pooling}, cpu: {args.cpu}, no_vm: {args.no_vm}, labels_num: {args.labels_num}")
+    logging.info(f"pooling: {args.pooling}, cpu: {args.cpu}, no_vm: {args.no_vm}, labels_num: {args.labels_num}, manual: {args.manual}")
     logging.info(f"dropout: {args.dropout}, entity_recognition: {args.entity_recognition}, threshold: {args.threshold}, learning rate: {args.learning_rate}")
     logging.info(f"batch_size: {args.batch_size}, seq_length: {args.seq_length}, epochs_num: {args.epochs_num}, seed: {args.seed}")
 

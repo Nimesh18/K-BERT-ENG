@@ -89,6 +89,8 @@ def main():
                         help="Path of dataset embedding file.")
     parser.add_argument("--logging_path", default="./outputs/logging/", type=str,
                         help="Path of logging file output.")
+    parser.add_argument("--correct_ents_path", default="./cache/ag_news/correct_entities.tsv", type=str,
+                        help="Path of the correct entities for manual injection.")
 
     # Model options.
     parser.add_argument("--batch_size", type=int, default=32,
@@ -163,6 +165,8 @@ def main():
     parser.add_argument("--sequence", type=int, help="Sequence to inject knowledge into", default=None)
 
     parser.add_argument("--max_seq_len", type=int, help="Maximum Sequence length where knowledge can be injected into", default=None)
+
+    parser.add_argument("--manual", action="store_true", required=False, help="Perform Manual Knowledge Injection", default=False)
 
     args = parser.parse_args()
 
@@ -242,8 +246,8 @@ def run(args):
     model = model.to(device)
     
     # Build knowledge graph.
-    kg = KnowledgeGraph(connurl=args.sqlconnectionurl, cache_path=args.cache_path,
-     cache_embedding_path=args.cache_embedding_path, compute_embeddings=args.compute_embeddings)
+    kg = KnowledgeGraph(connurl=args.sqlconnectionurl, cache_path=args.cache_path, manual_path=args.correct_ents_path,
+     cache_embedding_path=args.cache_embedding_path, compute_embeddings=args.compute_embeddings, manual=args.manual)
 
     # Training phase.
     logging.info("Start training.")
@@ -297,7 +301,7 @@ def run(args):
             pos_ids_batch = pos_ids_batch.to(device)
             vms_batch = vms_batch.to(device)
 
-            loss, _ = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos=pos_ids_batch, vm=vms_batch)
+            loss, logits = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos=pos_ids_batch, vm=vms_batch)
             if torch.cuda.device_count() > 1:
                 loss = torch.mean(loss)
             total_loss += loss.item()

@@ -7,20 +7,20 @@ import brain.config as config
 from database import Database
 from transformers import BertTokenizerFast
 from common.embedding.transformer import RoBERTa
-from common.utils import group_related_tokens, sym_matrix_to_vec
-
+from common.utils import group_related_tokens, sym_matrix_to_vec, load_cache
 
 class KnowledgeGraph(object):
-    """
-    spo_files - list of Path of *.spo files, or default kg name. e.g., ['HowNet']
-    """
 
-    def __init__(self, connurl, cache_path, cache_embedding_path, compute_embeddings=False):
+    def __init__(self, connurl, cache_path, cache_embedding_path, manual_path, compute_embeddings=False, manual=False):
         self.connurl = connurl
         self.lookup_table = Database(connurl, cache_path, cache_embedding_path if not compute_embeddings else None)
         self.tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', never_split=config.NEVER_SPLIT_TAG)
         self.embedder = RoBERTa() if compute_embeddings else None
+        self.compute_embeddings = compute_embeddings
         self.special_tags = set(config.NEVER_SPLIT_TAG)
+        self.manual = manual
+        if self.manual:
+            self.correct_ents = load_cache(manual_path)
 
     def remove_trailing_padding(self, tokens, vm):
         if config.PAD_TOKEN not in tokens:
@@ -29,6 +29,13 @@ class KnowledgeGraph(object):
         end = tokens.index(config.PAD_TOKEN)
         return tokens[:end], vm[:end,:end]
 
+    def get_correct_knowledge(self, sent_batch, entity):
+        x1,x2 = sent_batch
+        obj = self.correct_ents[f"{x1.lower()}{x2.lower()}"]
+        if entity in obj['ent']:
+            idx = obj['ent'].index(entity)
+            return obj['kg'][idx]
+        return None
 
     def add_knowledge_with_vm(self, sent_batch, named_entities, seq=None, max_seq_len=None, max_length=128, threshold=0, e=None):
         """
@@ -64,24 +71,34 @@ class KnowledgeGraph(object):
                     entity = matches[match_idx]
                     sequence = tokenized_sent.token_to_sequence(idx)
                     
-                    concepts, concept_embeddings = self.lookup_table.retrieve_wiki_concepts(entity)
-                    if len(concepts) > 0 and (seq is None or sequence == seq):
-
-                        if self.embedder is not None:
-                            instance_embeddings = self.embedder.get_sentence_embedding(list(map(lambda x: " ".join(x), concepts)))
-                            sent_embedding = self.embedder.get_sentence_embedding(sent[sequence]).squeeze()
-                        else:
-                            sent_embedding = e[sent[sequence].strip()]
-                            instance_embeddings = concept_embeddings
-
-                        max_id, max_val = RoBERTa.get_most_similar(sent_embedding, instance_embeddings)
-
-                        if max_val > threshold:
-                            entities = concepts[max_id]
+                    if self.manual:
+                        knowledge = self.get_correct_knowledge(sent, entity)
+                        if knowledge is not None and (seq is None or sequence == seq):
+                            entities = [knowledge]
                             if max_seq_len is not None:
                                 ents_len = ents_len + sum(list(map(lambda x: len(self.tokenizer.tokenize(x)), entities)))
                                 if ents_len + len(tokenized_sent.tokens()) >= max_seq_len:
                                     entities = []
+                    else:
+                        concepts, concept_embeddings = self.lookup_table.retrieve_wiki_concepts(entity)
+
+                        if len(concepts) > 0 and (seq is None or sequence == seq):
+
+                            if self.compute_embeddings:
+                                instance_embeddings = self.embedder.get_sentence_embedding(list(map(lambda x: " ".join(x), concepts)))
+                                sent_embedding = self.embedder.get_sentence_embedding(sent[sequence]).squeeze()
+                            else:
+                                sent_embedding = e[sent[sequence].strip()]
+                                instance_embeddings = concept_embeddings
+
+                            max_id, max_val = RoBERTa.get_most_similar(sent_embedding, instance_embeddings)
+
+                            if max_val > threshold:
+                                entities = concepts[max_id]
+                                if max_seq_len is not None:
+                                    ents_len = ents_len + sum(list(map(lambda x: len(self.tokenizer.tokenize(x)), entities)))
+                                    if ents_len + len(tokenized_sent.tokens()) >= max_seq_len:
+                                        entities = []
 
 
                 sent_tree.append((token_group, entities))
