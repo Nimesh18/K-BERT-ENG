@@ -57,6 +57,16 @@ useage: [--pretrained_model_path] - Path to the pre-trained model parameters.
         [--epochs_num] - The number of training epoches.
         [--batch_size] - Batch size of the training process.
         [--output_model_path] - Path to the output model.
+        [--cache_path] - Path of the KG cache file.
+        [--cache_embedding_path] - Path of the cache embedding file.
+        [--sentence_embedding_path] - Path of the dataset embedding file.
+        [--logging_path] - Path to output logs.
+        [--correct_ents_path] - Path of the manually injected knowledge.
+        [--manual] - Perform Manual Knowledge Injection.
+        [--entity_recognition] - Entity extraction method.
+        [--threshold] - Similarity threshold between embeddings.
+        [--max_seq_len] - Maximum sequence length permittable for knowledge injection.
+        [--dataset_cache_limit] - Number of items per dataset cache file.
 ```
 
 ## K-BERT for text classification
@@ -91,4 +101,14 @@ useage: [--pretrained_model_path] - Path to the pre-trained model parameters.
         [--epochs_num] - The number of training epoches.
         [--batch_size] - Batch size of the training process.
         [--output_model_path] - Path to the output model.
+        [--cache_path] - Path of the KG cache file.
+        [--cache_embedding_path] - Path of the cache embedding file.
+        [--sentence_embedding_path] - Path of the dataset embedding file.
+        [--logging_path] - Path to output logs.
+        [--correct_ents_path] - Path of the manually injected knowledge.
+        [--manual] - Perform Manual Knowledge Injection.
+        [--entity_recognition] - Entity extraction method.
+        [--threshold] - Similarity threshold between embeddings.
+        [--max_seq_len] - Maximum sequence length permittable for knowledge injection.
+        [--dataset_cache_limit] - Number of items per dataset cache file.
 ```

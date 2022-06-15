@@ -85,7 +85,7 @@ def main():
                         help="Path of KG cache file.")
     parser.add_argument("--cache_embedding_path", default="./cache/ag_news/cache_embeddings.json", type=str,
                         help="Path of embedding cache file.")
-    parser.add_argument("--sentence_embedding_path", default="./cache/ag_news/sample/", type=str,
+    parser.add_argument("--sentence_embedding_path", default="./cache/ag_news/", type=str,
                         help="Path of dataset embedding file.")
     parser.add_argument("--logging_path", default="./outputs/logging/", type=str,
                         help="Path of logging file output.")
