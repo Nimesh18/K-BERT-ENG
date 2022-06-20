@@ -18,7 +18,7 @@ spacy==3.0.0
 
 
 ## Prepare
-All required data can be found [here]()
+All required data can be found [here](https://e1.pcloud.link/publink/show?code=kZKfORZAoO1PomVPq7zQSgy2EI9PbBf3qBy)
 * Download the ``bert-base-uncased.bin`` and save it to the ``models/english`` directory.
 * Download the ``cache`` folder and save it in root ``/`` directory.
 * Download the ``datasets`` folder and save it in root ``/`` directory.
