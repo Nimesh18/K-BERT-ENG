@@ -1,3 +1,3 @@
-# Outputs
+# Sample Outputs
 
-All files in this directory are excluded from Git.
+Sample inputs and outputs are provided in samples/

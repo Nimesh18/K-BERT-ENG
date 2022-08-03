@@ -1,0 +1,196 @@
+Input:
+pretrained_model_path: ./drive/MyDrive/K-BERT-master/models/english/bert-base-uncased.bin
+config_path: ./drive/MyDrive/K-BERT-master/models/google_config.json
+vocab_path: ./drive/MyDrive/K-BERT-master/models/english/vocab-uncased.txt
+output_model_path: ./drive/MyDrive/K-BERT-master/outputs/kbert_Wikidata_stsb8.bin
+train_path: ./drive/MyDrive/K-BERT-master/datasets/stsb/original/train.tsv
+dev_path: ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+test_path: ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+sentence_embedding_path: ./drive/MyDrive/K-BERT-master/cache/stsb/
+cache_path: ./drive/MyDrive/K-BERT-master/cache/stsb/cache-no-cat.json
+cache_embedding_path: ./drive/MyDrive/K-BERT-master/cache/stsb/cache-no-cat-embeddings.json
+sqlconnectionurl: None, sequence: None, max_seq_len: None, selective: False
+pooling: first, cpu: False, no_vm: False, labels_num: 1
+dropout: 0.1, entity_recognition: spacy, threshold: 0.5, learning rate: 4e-05
+batch_size: 16, seq_length: 256, epochs_num: 10, seed: 8
+===========================================================================================
+Output:
+[BertClassifier] use visible_matrix: True
+Using device: cuda
+Start training.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/train.tsv
+Time taken for processing entities: 4.17s
+There are 5749 sentence in total. We use 1 processes to inject knowledge into sentences.
+Time taken to read training set: 14.92s
+Shuffling dataset
+Batch size: 16
+The number of training instances: 5749
+Begin training loop
+Epoch id: 1, Training steps: 100, Avg loss: 0.053
+Epoch id: 1, Training steps: 200, Avg loss: 0.031
+Epoch id: 1, Training steps: 300, Avg loss: 0.030
+Time taken for epoch 1 in training loop: 74.05s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.42s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 2.969, batches = 94, Avg loss = 0.032
+Spearman correlation = (0.88495, 0.00), Pearson correlation = (0.88584, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.36s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 3.448, batches = 87, Avg loss = 0.040
+Spearman correlation = (0.83743, 0.00), Pearson correlation = (0.84762, 0.00)
+Epoch id: 2, Training steps: 100, Avg loss: 0.036
+Epoch id: 2, Training steps: 200, Avg loss: 0.016
+Epoch id: 2, Training steps: 300, Avg loss: 0.016
+Time taken for epoch 2 in training loop: 74.92s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.34s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.714, batches = 94, Avg loss = 0.018
+Spearman correlation = (0.89061, 0.00), Pearson correlation = (0.89364, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.20s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 2.057, batches = 87, Avg loss = 0.024
+Spearman correlation = (0.85660, 0.00), Pearson correlation = (0.86577, 0.00)
+Epoch id: 3, Training steps: 100, Avg loss: 0.018
+Epoch id: 3, Training steps: 200, Avg loss: 0.009
+Epoch id: 3, Training steps: 300, Avg loss: 0.007
+Time taken for epoch 3 in training loop: 75.20s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.40s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 2.196, batches = 94, Avg loss = 0.023
+Spearman correlation = (0.89690, 0.00), Pearson correlation = (0.90060, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.21s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 2.481, batches = 87, Avg loss = 0.029
+Spearman correlation = (0.85632, 0.00), Pearson correlation = (0.86686, 0.00)
+Epoch id: 4, Training steps: 100, Avg loss: 0.012
+Epoch id: 4, Training steps: 200, Avg loss: 0.006
+Epoch id: 4, Training steps: 300, Avg loss: 0.006
+Time taken for epoch 4 in training loop: 72.81s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.40s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.931, batches = 94, Avg loss = 0.021
+Spearman correlation = (0.89615, 0.00), Pearson correlation = (0.90005, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 2.182, batches = 87, Avg loss = 0.025
+Spearman correlation = (0.86186, 0.00), Pearson correlation = (0.87073, 0.00)
+Epoch id: 5, Training steps: 100, Avg loss: 0.012
+Epoch id: 5, Training steps: 200, Avg loss: 0.006
+Epoch id: 5, Training steps: 300, Avg loss: 0.006
+Time taken for epoch 5 in training loop: 75.33s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.41s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 2.141, batches = 94, Avg loss = 0.023
+Spearman correlation = (0.89651, 0.00), Pearson correlation = (0.90055, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.20s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 2.335, batches = 87, Avg loss = 0.027
+Spearman correlation = (0.86098, 0.00), Pearson correlation = (0.87093, 0.00)
+Epoch id: 6, Training steps: 100, Avg loss: 0.009
+Epoch id: 6, Training steps: 200, Avg loss: 0.004
+Epoch id: 6, Training steps: 300, Avg loss: 0.003
+Time taken for epoch 6 in training loop: 75.57s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.56s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.723, batches = 94, Avg loss = 0.018
+Spearman correlation = (0.89545, 0.00), Pearson correlation = (0.89952, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 2.019, batches = 87, Avg loss = 0.023
+Spearman correlation = (0.86136, 0.00), Pearson correlation = (0.86931, 0.00)
+Epoch id: 7, Training steps: 100, Avg loss: 0.006
+Epoch id: 7, Training steps: 200, Avg loss: 0.004
+Epoch id: 7, Training steps: 300, Avg loss: 0.003
+Time taken for epoch 7 in training loop: 77.50s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.40s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.662, batches = 94, Avg loss = 0.018
+Spearman correlation = (0.89631, 0.00), Pearson correlation = (0.89984, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.20s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 1.963, batches = 87, Avg loss = 0.023
+Spearman correlation = (0.86399, 0.00), Pearson correlation = (0.87129, 0.00)
+Epoch id: 8, Training steps: 100, Avg loss: 0.004
+Epoch id: 8, Training steps: 200, Avg loss: 0.003
+Epoch id: 8, Training steps: 300, Avg loss: 0.002
+Time taken for epoch 8 in training loop: 76.66s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.56s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.631, batches = 94, Avg loss = 0.017
+Spearman correlation = (0.89759, 0.00), Pearson correlation = (0.90091, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 1.952, batches = 87, Avg loss = 0.022
+Spearman correlation = (0.86417, 0.00), Pearson correlation = (0.87164, 0.00)
+Epoch id: 9, Training steps: 100, Avg loss: 0.003
+Epoch id: 9, Training steps: 200, Avg loss: 0.002
+Epoch id: 9, Training steps: 300, Avg loss: 0.002
+Time taken for epoch 9 in training loop: 75.38s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.40s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.650, batches = 94, Avg loss = 0.018
+Spearman correlation = (0.89873, 0.00), Pearson correlation = (0.90240, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 1.948, batches = 87, Avg loss = 0.022
+Spearman correlation = (0.86472, 0.00), Pearson correlation = (0.87282, 0.00)
+Epoch id: 10, Training steps: 100, Avg loss: 0.003
+Epoch id: 10, Training steps: 200, Avg loss: 0.002
+Epoch id: 10, Training steps: 300, Avg loss: 0.002
+Time taken for epoch 10 in training loop: 75.48s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/dev.tsv
+Time taken for processing entities: 1.34s
+There are 1500 sentence in total. We use 1 processes to inject knowledge into sentences.
+Total Loss = 1.714, batches = 94, Avg loss = 0.018
+Spearman correlation = (0.89871, 0.00), Pearson correlation = (0.90245, 0.00)
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 1.996, batches = 87, Avg loss = 0.023
+Spearman correlation = (0.86393, 0.00), Pearson correlation = (0.87240, 0.00)
+Final evaluation on the test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/stsb/original/test.tsv
+Time taken for processing entities: 1.19s
+There are 1379 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 1379
+Total Loss = 1.952, batches = 87, Avg loss = 0.022
+Spearman correlation = (0.86417, 0.00), Pearson correlation = (0.87164, 0.00)
+Time taken: 995.38 seconds

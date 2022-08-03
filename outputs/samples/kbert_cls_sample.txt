@@ -1,0 +1,354 @@
+Input:
+pretrained_model_path: ./drive/MyDrive/K-BERT-master/models/english/bert-base-uncased.bin
+config_path: ./drive/MyDrive/K-BERT-master/models/google_config.json
+vocab_path: ./drive/MyDrive/K-BERT-master/models/english/vocab-uncased.txt
+output_model_path: ./drive/MyDrive/K-BERT-master/outputs/kbert_Wikidata_cls8.bin
+train_path: ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/train.tsv
+dev_path: ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+test_path: ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+sentence_embedding_path: ./drive/MyDrive/K-BERT-master/cache/ag_news/
+cache_path: ./drive/MyDrive/K-BERT-master/cache/ag_news/cache.json
+cache_embedding_path: ./drive/MyDrive/K-BERT-master/cache/ag_news/cache_embeddings.json
+sqlconnectionurl: None, sequence: None, max_seq_len: None, selective: False
+pooling: first, cpu: False, no_vm: False, labels_num: 4
+dropout: 0.1, entity_recognition: spacy, threshold: 0.6, learning rate: 5e-05
+batch_size: 32, seq_length: 128, epochs_num: 10, seed: 8
+=========================================================================================
+Output:
+[BertClassifier] use visible_matrix: True
+Using device: cuda
+Start training.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/train.tsv
+Time taken for processing entities: 126.68s
+There are 110400 sentence in total. We use 1 processes to inject knowledge into sentences.
+Time taken to read training set: 274.38s
+Shuffling dataset
+The number of training instances: 110400
+Begin training loop
+Epoch id: 1, Training steps: 1000, Avg loss: 0.372
+Epoch id: 1, Training steps: 2000, Avg loss: 0.207
+Epoch id: 1, Training steps: 3000, Avg loss: 0.191
+Time taken for epoch 1 in training loop: 672.55s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 11.86s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.951, 0.923, 0.937
+Label 1: 0.969, 0.986, 0.978
+Label 2: 0.895, 0.931, 0.912
+Label 3: 0.933, 0.909, 0.921
+Acc. (Correct/Total): 0.9370 (8995/9600)
+Evaluation on dev dataset time taken: 45.41s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.73s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1778,   16,   37,   37],
+        [  20, 1876,   12,   17],
+        [  65,    3, 1758,  127],
+        [  37,    5,   93, 1719]])
+Report precision, recall, and f1:
+Label 0: 0.952, 0.936, 0.944
+Label 1: 0.975, 0.987, 0.981
+Label 2: 0.900, 0.925, 0.913
+Label 3: 0.927, 0.905, 0.916
+Acc. (Correct/Total): 0.9383 (7131/7600)
+Evaluation on test dataset time taken: 31.41s
+Epoch id: 2, Training steps: 1000, Avg loss: 0.242
+Epoch id: 2, Training steps: 2000, Avg loss: 0.130
+Epoch id: 2, Training steps: 3000, Avg loss: 0.116
+Time taken for epoch 2 in training loop: 680.68s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 11.59s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.961, 0.943, 0.952
+Label 1: 0.983, 0.986, 0.985
+Label 2: 0.909, 0.947, 0.928
+Label 3: 0.946, 0.922, 0.934
+Acc. (Correct/Total): 0.9496 (9116/9600)
+Evaluation on dev dataset time taken: 44.80s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.72s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1807,    8,   28,   37],
+        [   9, 1879,    6,    6],
+        [  52,    7, 1780,  109],
+        [  32,    6,   86, 1748]])
+Report precision, recall, and f1:
+Label 0: 0.961, 0.951, 0.956
+Label 1: 0.989, 0.989, 0.989
+Label 2: 0.914, 0.937, 0.925
+Label 3: 0.934, 0.920, 0.927
+Acc. (Correct/Total): 0.9492 (7214/7600)
+Evaluation on test dataset time taken: 31.28s
+Epoch id: 3, Training steps: 1000, Avg loss: 0.147
+Epoch id: 3, Training steps: 2000, Avg loss: 0.079
+Epoch id: 3, Training steps: 3000, Avg loss: 0.073
+Time taken for epoch 3 in training loop: 659.16s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.80s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.960, 0.939, 0.949
+Label 1: 0.975, 0.992, 0.983
+Label 2: 0.917, 0.933, 0.925
+Label 3: 0.936, 0.925, 0.931
+Acc. (Correct/Total): 0.9472 (9093/9600)
+Evaluation on dev dataset time taken: 40.34s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.70s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1795,    5,   38,   29],
+        [  16, 1883,   10,   12],
+        [  54,    6, 1764,   99],
+        [  35,    6,   88, 1760]])
+Report precision, recall, and f1:
+Label 0: 0.961, 0.945, 0.953
+Label 1: 0.980, 0.991, 0.986
+Label 2: 0.917, 0.928, 0.923
+Label 3: 0.932, 0.926, 0.929
+Acc. (Correct/Total): 0.9476 (7202/7600)
+Evaluation on test dataset time taken: 31.33s
+Epoch id: 4, Training steps: 1000, Avg loss: 0.099
+Epoch id: 4, Training steps: 2000, Avg loss: 0.054
+Epoch id: 4, Training steps: 3000, Avg loss: 0.044
+Time taken for epoch 4 in training loop: 681.91s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.75s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.962, 0.947, 0.954
+Label 1: 0.991, 0.983, 0.987
+Label 2: 0.935, 0.922, 0.929
+Label 3: 0.916, 0.950, 0.932
+Acc. (Correct/Total): 0.9505 (9125/9600)
+Evaluation on dev dataset time taken: 44.73s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.68s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1815,   11,   45,   25],
+        [   5, 1870,    5,    6],
+        [  43,    9, 1711,   66],
+        [  37,   10,  139, 1803]])
+Report precision, recall, and f1:
+Label 0: 0.957, 0.955, 0.956
+Label 1: 0.992, 0.984, 0.988
+Label 2: 0.935, 0.901, 0.918
+Label 3: 0.906, 0.949, 0.927
+Acc. (Correct/Total): 0.9472 (7199/7600)
+Evaluation on test dataset time taken: 31.31s
+Epoch id: 5, Training steps: 1000, Avg loss: 0.068
+Epoch id: 5, Training steps: 2000, Avg loss: 0.036
+Epoch id: 5, Training steps: 3000, Avg loss: 0.028
+Time taken for epoch 5 in training loop: 700.68s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.71s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.951, 0.954, 0.953
+Label 1: 0.983, 0.990, 0.987
+Label 2: 0.938, 0.924, 0.931
+Label 3: 0.928, 0.932, 0.930
+Acc. (Correct/Total): 0.9501 (9121/9600)
+Evaluation on dev dataset time taken: 39.33s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 9.43s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1831,   10,   52,   42],
+        [  11, 1878,    7,    7],
+        [  33,    6, 1729,   83],
+        [  25,    6,  112, 1768]])
+Report precision, recall, and f1:
+Label 0: 0.946, 0.964, 0.955
+Label 1: 0.987, 0.988, 0.988
+Label 2: 0.934, 0.910, 0.922
+Label 3: 0.925, 0.931, 0.928
+Acc. (Correct/Total): 0.9482 (7206/7600)
+Evaluation on test dataset time taken: 31.97s
+Epoch id: 6, Training steps: 1000, Avg loss: 0.042
+Epoch id: 6, Training steps: 2000, Avg loss: 0.022
+Epoch id: 6, Training steps: 3000, Avg loss: 0.019
+Time taken for epoch 6 in training loop: 681.83s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.73s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.966, 0.941, 0.953
+Label 1: 0.976, 0.994, 0.985
+Label 2: 0.927, 0.931, 0.929
+Label 3: 0.929, 0.933, 0.931
+Acc. (Correct/Total): 0.9496 (9116/9600)
+Evaluation on dev dataset time taken: 39.38s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.65s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1807,    5,   33,   28],
+        [  17, 1885,   17,    9],
+        [  45,    1, 1746,  101],
+        [  31,    9,  104, 1762]])
+Report precision, recall, and f1:
+Label 0: 0.965, 0.951, 0.958
+Label 1: 0.978, 0.992, 0.985
+Label 2: 0.922, 0.919, 0.921
+Label 3: 0.924, 0.927, 0.926
+Acc. (Correct/Total): 0.9474 (7200/7600)
+Evaluation on test dataset time taken: 32.16s
+Epoch id: 7, Training steps: 1000, Avg loss: 0.025
+Epoch id: 7, Training steps: 2000, Avg loss: 0.012
+Epoch id: 7, Training steps: 3000, Avg loss: 0.012
+Time taken for epoch 7 in training loop: 684.79s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.68s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.965, 0.938, 0.951
+Label 1: 0.987, 0.990, 0.988
+Label 2: 0.925, 0.939, 0.932
+Label 3: 0.926, 0.936, 0.931
+Acc. (Correct/Total): 0.9507 (9127/9600)
+Evaluation on dev dataset time taken: 43.74s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.76s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1819,    6,   36,   30],
+        [   7, 1880,    6,    6],
+        [  39,    7, 1767,   96],
+        [  35,    7,   91, 1768]])
+Report precision, recall, and f1:
+Label 0: 0.962, 0.957, 0.960
+Label 1: 0.990, 0.989, 0.990
+Label 2: 0.926, 0.930, 0.928
+Label 3: 0.930, 0.931, 0.930
+Acc. (Correct/Total): 0.9518 (7234/7600)
+Evaluation on test dataset time taken: 31.47s
+Epoch id: 8, Training steps: 1000, Avg loss: 0.016
+Epoch id: 8, Training steps: 2000, Avg loss: 0.009
+Epoch id: 8, Training steps: 3000, Avg loss: 0.007
+Time taken for epoch 8 in training loop: 687.86s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 11.73s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.944, 0.956, 0.950
+Label 1: 0.984, 0.990, 0.987
+Label 2: 0.942, 0.921, 0.931
+Label 3: 0.929, 0.933, 0.931
+Acc. (Correct/Total): 0.9499 (9119/9600)
+Evaluation on dev dataset time taken: 40.46s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.75s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1838,   15,   57,   38],
+        [   7, 1877,    6,    9],
+        [  30,    3, 1739,   83],
+        [  25,    5,   98, 1770]])
+Report precision, recall, and f1:
+Label 0: 0.944, 0.967, 0.955
+Label 1: 0.988, 0.988, 0.988
+Label 2: 0.937, 0.915, 0.926
+Label 3: 0.933, 0.932, 0.932
+Acc. (Correct/Total): 0.9505 (7224/7600)
+Evaluation on test dataset time taken: 31.41s
+Epoch id: 9, Training steps: 1000, Avg loss: 0.009
+Epoch id: 9, Training steps: 2000, Avg loss: 0.005
+Epoch id: 9, Training steps: 3000, Avg loss: 0.004
+Time taken for epoch 9 in training loop: 683.73s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.81s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.955, 0.949, 0.952
+Label 1: 0.983, 0.990, 0.987
+Label 2: 0.932, 0.936, 0.934
+Label 3: 0.937, 0.932, 0.935
+Acc. (Correct/Total): 0.9519 (9138/9600)
+Evaluation on dev dataset time taken: 44.95s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.70s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1821,    7,   43,   32],
+        [   6, 1882,    4,    9],
+        [  44,    6, 1769,   92],
+        [  29,    5,   84, 1767]])
+Report precision, recall, and f1:
+Label 0: 0.957, 0.958, 0.958
+Label 1: 0.990, 0.991, 0.990
+Label 2: 0.926, 0.931, 0.928
+Label 3: 0.937, 0.930, 0.934
+Acc. (Correct/Total): 0.9525 (7239/7600)
+Evaluation on test dataset time taken: 31.33s
+Epoch id: 10, Training steps: 1000, Avg loss: 0.006
+Epoch id: 10, Training steps: 2000, Avg loss: 0.002
+Epoch id: 10, Training steps: 3000, Avg loss: 0.002
+Time taken for epoch 10 in training loop: 686.47s
+Start evaluation on dev dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/dev.tsv
+Time taken for processing entities: 10.67s
+There are 9600 sentence in total. We use 1 processes to inject knowledge into sentences.
+Label 0: 0.963, 0.945, 0.954
+Label 1: 0.980, 0.992, 0.986
+Label 2: 0.932, 0.936, 0.934
+Label 3: 0.933, 0.936, 0.934
+Acc. (Correct/Total): 0.9522 (9141/9600)
+Evaluation on dev dataset time taken: 44.67s
+Start evaluation on test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.63s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1815,    8,   35,   25],
+        [  10, 1882,    7,    9],
+        [  46,    5, 1772,   88],
+        [  29,    5,   86, 1778]])
+Report precision, recall, and f1:
+Label 0: 0.964, 0.955, 0.960
+Label 1: 0.986, 0.991, 0.988
+Label 2: 0.927, 0.933, 0.930
+Label 3: 0.937, 0.936, 0.936
+Acc. (Correct/Total): 0.9536 (7247/7600)
+Evaluation on test dataset time taken: 31.25s
+Final evaluation on the test dataset.
+Loading sentences from ./drive/MyDrive/K-BERT-master/datasets/ag_news/original/test.tsv
+Time taken for processing entities: 8.63s
+There are 7600 sentence in total. We use 1 processes to inject knowledge into sentences.
+The number of evaluation instances: 7600
+Confusion matrix:
+tensor([[1815,    8,   35,   25],
+        [  10, 1882,    7,    9],
+        [  46,    5, 1772,   88],
+        [  29,    5,   86, 1778]])
+Report precision, recall, and f1:
+Label 0: 0.964, 0.955, 0.960
+Label 1: 0.986, 0.991, 0.988
+Label 2: 0.927, 0.933, 0.930
+Label 3: 0.937, 0.936, 0.936
+Acc. (Correct/Total): 0.9536 (7247/7600)
+Time taken: 7890.66 seconds
